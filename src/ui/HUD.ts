@@ -144,12 +144,14 @@ export class BattlefieldHUD {
       this.captureBannerEl.classList.add("hidden");
     }
 
-    // Interaction Prompt ([E] Enter Vehicle / Pointer Lock Hint)
-    if (!player.isPointerLocked) {
+    // Interaction Prompt ([E] Enter Vehicle / Desktop Pointer Lock Hint)
+    if (!player.isTouchMode && !player.isPointerLocked) {
       this.interactEl.textContent = "点击画面锁定准星继续作战 (ESC 释放鼠标)";
       this.interactEl.classList.remove("hidden");
     } else if (!player.activeVehicle && player.nearbyVehicle) {
-      this.interactEl.textContent = `[E] 驾驶 ${player.nearbyVehicle.displayName}`;
+      this.interactEl.textContent = player.isTouchMode
+        ? `点击驾驶 ${player.nearbyVehicle.displayName}`
+        : `[E] 驾驶 ${player.nearbyVehicle.displayName}`;
       this.interactEl.classList.remove("hidden");
     } else {
       this.interactEl.classList.add("hidden");

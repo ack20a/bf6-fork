@@ -1,13 +1,6 @@
 /**
  * First-Person Tactical Infantry & Combined-Arms Player Controller.
- * Features:
- *  - Pointer-Lock Mouse Look, Sprint, Crouch, Jump, Stair-Stepping & Out-of-Combat HP Regen
- *  - Skinned `CHR_FPS_Arms_Rig` Viewmodel + 4 Tactical Loadout Slots:
- *      [1] M5A3 Assault Rifle (780 RPM, True 3D Holographic Sight ADS, Bolt Carrier Recoil)
- *      [2] RPG-7V2 Anti-Tank / Wall-Breaching Launcher (Visible Warhead Toggle, 520 Blast Damage)
- *      [3] M2010 ESR .300 WinMag Sniper (8.0x Ballistic Scope Overlay, One-Shot Infantry / Headshot Multiplier)
- *      [4] C4 Breach Pack + Tactical Clacker Detonator (Sticky Jeep/Tank/Wall C4 + Sequential Detonation)
- *  - Seamless [E] Enter/Exit for M1A2 AbramsX Tank, AH-6J Little Bird Helicopter & LATV4 4x4, [V] 1P/3P Camera
+ * Supports both Desktop Keyboard/Mouse (PointerLock) and Mobile Multi-Touch Twin-Stick Controls!
  */
 
 import * as THREE from "three";
@@ -59,6 +52,7 @@ export class PlayerController implements DamageableActor {
   public vehicleThirdPerson = true;
   public nearbyVehicle: CombatVehicle | null = null;
   public isPointerLocked = false;
+  public isTouchMode = false;
   public isReloading = false;
   public isScoped8x = false;
   public isSprinting = false;
@@ -77,10 +71,29 @@ export class PlayerController implements DamageableActor {
   private muzzleFlashTimer = 0;
   private clackerAnimTimer = 0;
 
-  // Input tracking
+  // Desktop Input tracking
   private keys = new Set<string>();
   private mouseLeft = false;
   private mouseRight = false;
+
+  // Mobile Multi-Touch Twin-Stick State
+  private joyTouchId: number | null = null;
+  private joyOriginX = 0;
+  private joyOriginY = 0;
+  private joyX = 0; // -1 (left) .. +1 (right)
+  private joyY = 0; // -1 (up/forward) .. +1 (down/back)
+  private lookTouchId: number | null = null;
+  private lookLastX = 0;
+  private lookLastY = 0;
+  private fireTouchId: number | null = null;
+  private fireLastX = 0;
+  private fireLastY = 0;
+
+  private touchFirePrimary = false;
+  private touchFireSecondary = false;
+  private touchAdsToggled = false;
+  private touchJumpQueued = false;
+  private touchVehUp = false;
 
   // Viewmodel rig & muzzle FX
   private viewmodelRoot = new THREE.Group();
@@ -122,10 +135,58 @@ export class PlayerController implements DamageableActor {
 
     // 2. Build 4 Tactical Weapon Viewmodels
     this.slots = {
-      1: this.buildSlot(1, "WPN_AssaultRifle_M5A3", "M5A3 TACTICAL CARBINE", 30, 150, 780, 1.85, new THREE.Vector3(0, -0.106, -0.22), new THREE.Vector3(0.145, -0.155, -0.27), 54, assets),
-      2: this.buildSlot(2, "WPN_Launcher_RPG7V2", "RPG-7V2 ANTI-ARMOR", 1, 5, 45, 2.35, new THREE.Vector3(-0.035, -0.075, -0.22), new THREE.Vector3(0.16, -0.15, -0.24), 56, assets),
-      3: this.buildSlot(3, "WPN_Sniper_M2010", "M2010 ESR .300WM", 5, 25, 52, 2.2, new THREE.Vector3(0, -0.095, -0.2), new THREE.Vector3(0.15, -0.16, -0.28), 13.5, assets),
-      4: this.buildSlot(4, "GAD_C4_Detonator", "C4 BREACH PACK + CLACKER", 3, 3, 120, 1.0, new THREE.Vector3(0.12, -0.14, -0.26), new THREE.Vector3(0.14, -0.16, -0.28), 70, assets),
+      1: this.buildSlot(
+        1,
+        "WPN_AssaultRifle_M5A3",
+        "M5A3 TACTICAL CARBINE",
+        30,
+        150,
+        780,
+        1.85,
+        new THREE.Vector3(0, -0.106, -0.22),
+        new THREE.Vector3(0.145, -0.155, -0.27),
+        54,
+        assets
+      ),
+      2: this.buildSlot(
+        2,
+        "WPN_Launcher_RPG7V2",
+        "RPG-7V2 ANTI-ARMOR",
+        1,
+        5,
+        45,
+        2.35,
+        new THREE.Vector3(-0.035, -0.075, -0.22),
+        new THREE.Vector3(0.16, -0.15, -0.24),
+        56,
+        assets
+      ),
+      3: this.buildSlot(
+        3,
+        "WPN_Sniper_M2010",
+        "M2010 ESR .300WM",
+        5,
+        25,
+        52,
+        2.2,
+        new THREE.Vector3(0, -0.095, -0.2),
+        new THREE.Vector3(0.15, -0.16, -0.28),
+        13.5,
+        assets
+      ),
+      4: this.buildSlot(
+        4,
+        "GAD_C4_Detonator",
+        "C4 BREACH PACK + CLACKER",
+        3,
+        3,
+        120,
+        1.0,
+        new THREE.Vector3(0.12, -0.14, -0.26),
+        new THREE.Vector3(0.14, -0.16, -0.28),
+        70,
+        assets
+      ),
     };
 
     // Muzzle flash star & point light attached to viewmodelRoot
@@ -139,8 +200,25 @@ export class PlayerController implements DamageableActor {
     this.viewmodelRoot.add(this.muzzleLight);
 
     this.equipSlot(1);
+    this.detectInitialTouchMode();
     this.bindInputEvents();
+    this.bindMobileTouchControls();
     this.physics.actors.push(this);
+  }
+
+  private detectInitialTouchMode(): void {
+    const coarse = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+    const smallViewport = window.innerWidth <= 860 && ("ontouchstart" in window || navigator.maxTouchPoints > 0);
+    if (coarse || smallViewport) {
+      this.enableTouchMode();
+    }
+  }
+
+  public enableTouchMode(): void {
+    if (this.isTouchMode) return;
+    this.isTouchMode = true;
+    document.body.classList.add("is-touch");
+    document.getElementById("touch-ui")?.classList.remove("hidden");
   }
 
   private buildSlot(
@@ -177,7 +255,6 @@ export class PlayerController implements DamageableActor {
       if (o.name.includes("Clacker")) clackerMesh = o;
     });
 
-    // Align ADS Y/X automatically from Socket_ADS if exported
     if (adsSocket && slot === 1) {
       adsPos.x = -adsSocket.position.x;
       adsPos.y = -adsSocket.position.y;
@@ -238,8 +315,8 @@ export class PlayerController implements DamageableActor {
       this.keys.delete(e.code);
     });
 
-    window.addEventListener("mousedown", (e) => {
-      if (!this.deployed) return;
+    this.domElement.addEventListener("mousedown", (e) => {
+      if (!this.deployed || this.isTouchMode) return;
       if (!this.isPointerLocked) {
         this.requestLock();
         return;
@@ -276,21 +353,303 @@ export class PlayerController implements DamageableActor {
     window.addEventListener("mousemove", (e) => {
       if (!this.isPointerLocked || !this.deployed) return;
       const sens = this.isScoped8x ? 0.00055 : this.adsBlend > 0.5 ? 0.0013 : 0.0021;
-      const dyaw = -e.movementX * sens;
-      const dpitch = -e.movementY * sens;
+      this.applyLookDelta(-e.movementX * sens, -e.movementY * sens);
+    });
+  }
 
-      if (this.activeVehicle) {
-        this.activeVehicle.applyMouseLook(dyaw, dpitch);
-      } else {
-        this.yaw += dyaw;
-        this.pitch = THREE.MathUtils.clamp(this.pitch + dpitch, -1.46, 1.46);
+  private applyLookDelta(dyaw: number, dpitch: number): void {
+    if (this.activeVehicle) {
+      this.activeVehicle.applyMouseLook(dyaw, dpitch);
+    } else {
+      this.yaw += dyaw;
+      this.pitch = THREE.MathUtils.clamp(this.pitch + dpitch, -1.46, 1.46);
+    }
+  }
+
+  private bindMobileTouchControls(): void {
+    // Auto-switch to Touch Mode on first touch anywhere
+    window.addEventListener(
+      "touchstart",
+      () => {
+        this.sfx.unlock();
+        this.enableTouchMode();
+      },
+      { passive: true }
+    );
+
+    // Clickable/Tappable Weapon Slots 1..4 & Interaction Prompt
+    for (const s of [1, 2, 3, 4] as const) {
+      const slotBtn = document.getElementById(`slot-${s}`);
+      slotBtn?.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        if (this.deployed && !this.activeVehicle) {
+          this.equipSlot(s);
+        }
+      });
+    }
+
+    const interactBtn = document.getElementById("interact-prompt");
+    interactBtn?.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      if (!this.deployed) return;
+      if (!this.isTouchMode && !this.isPointerLocked) {
+        this.requestLock();
+      } else if (this.nearbyVehicle || this.activeVehicle) {
+        this.toggleVehicleEnterExit();
       }
+    });
+
+    // 1. Left Virtual Thumbstick (`#touch-joystick-zone`)
+    const joyZone = document.getElementById("touch-joystick-zone");
+    const joyBase = document.getElementById("touch-joystick-base");
+    const joyStick = document.getElementById("touch-joystick-stick");
+    const maxJoyRadius = 42;
+
+    const updateStick = (clientX: number, clientY: number) => {
+      const dx = clientX - this.joyOriginX;
+      const dy = clientY - this.joyOriginY;
+      const dist = Math.hypot(dx, dy);
+      const clamped = Math.min(dist, maxJoyRadius);
+      const nx = dist > 1e-3 ? dx / dist : 0;
+      const ny = dist > 1e-3 ? dy / dist : 0;
+      const sx = nx * clamped;
+      const sy = ny * clamped;
+      this.joyX = sx / maxJoyRadius;
+      this.joyY = sy / maxJoyRadius;
+      if (joyStick) {
+        joyStick.style.transform = `translate3d(${sx.toFixed(1)}px, ${sy.toFixed(1)}px, 0)`;
+      }
+    };
+
+    const resetStick = () => {
+      this.joyTouchId = null;
+      this.joyX = 0;
+      this.joyY = 0;
+      if (joyStick) {
+        joyStick.style.transform = "translate3d(0px, 0px, 0)";
+      }
+    };
+
+    joyZone?.addEventListener(
+      "touchstart",
+      (e) => {
+        e.preventDefault();
+        if (this.joyTouchId !== null || !joyBase) return;
+        const t = e.changedTouches[0];
+        this.joyTouchId = t.identifier;
+        const rect = joyBase.getBoundingClientRect();
+        this.joyOriginX = rect.left + rect.width * 0.5;
+        this.joyOriginY = rect.top + rect.height * 0.5;
+        updateStick(t.clientX, t.clientY);
+      },
+      { passive: false }
+    );
+
+    joyZone?.addEventListener(
+      "touchmove",
+      (e) => {
+        e.preventDefault();
+        for (let i = 0; i < e.changedTouches.length; i++) {
+          const t = e.changedTouches[i];
+          if (t.identifier === this.joyTouchId) {
+            updateStick(t.clientX, t.clientY);
+            break;
+          }
+        }
+      },
+      { passive: false }
+    );
+
+    const onJoyEnd = (e: TouchEvent) => {
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        if (e.changedTouches[i].identifier === this.joyTouchId) {
+          resetStick();
+          break;
+        }
+      }
+    };
+    joyZone?.addEventListener("touchend", onJoyEnd);
+    joyZone?.addEventListener("touchcancel", onJoyEnd);
+
+    // 2. Right-Screen Touch Look Surface (`#touch-look-zone`)
+    const lookZone = document.getElementById("touch-look-zone");
+    const getTouchLookSens = () => (this.isScoped8x ? 0.0014 : this.adsBlend > 0.5 ? 0.003 : 0.0046);
+
+    lookZone?.addEventListener(
+      "touchstart",
+      (e) => {
+        e.preventDefault();
+        if (this.lookTouchId !== null) return;
+        const t = e.changedTouches[0];
+        this.lookTouchId = t.identifier;
+        this.lookLastX = t.clientX;
+        this.lookLastY = t.clientY;
+      },
+      { passive: false }
+    );
+
+    lookZone?.addEventListener(
+      "touchmove",
+      (e) => {
+        e.preventDefault();
+        for (let i = 0; i < e.changedTouches.length; i++) {
+          const t = e.changedTouches[i];
+          if (t.identifier === this.lookTouchId) {
+            const dx = t.clientX - this.lookLastX;
+            const dy = t.clientY - this.lookLastY;
+            this.lookLastX = t.clientX;
+            this.lookLastY = t.clientY;
+            const sens = getTouchLookSens();
+            this.applyLookDelta(-dx * sens, -dy * sens);
+            break;
+          }
+        }
+      },
+      { passive: false }
+    );
+
+    const onLookEnd = (e: TouchEvent) => {
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        if (e.changedTouches[i].identifier === this.lookTouchId) {
+          this.lookTouchId = null;
+          break;
+        }
+      }
+    };
+    lookZone?.addEventListener("touchend", onLookEnd);
+    lookZone?.addEventListener("touchcancel", onLookEnd);
+
+    // 3. Infantry Fire Button (Supports Hold + Drag-to-Aim simultaneously!)
+    const btnFire = document.getElementById("btn-touch-fire");
+    btnFire?.addEventListener(
+      "touchstart",
+      (e) => {
+        e.preventDefault();
+        const t = e.changedTouches[0];
+        this.fireTouchId = t.identifier;
+        this.fireLastX = t.clientX;
+        this.fireLastY = t.clientY;
+        btnFire.classList.add("active-hold");
+        if (this.activeSlot === 4) {
+          this.throwC4Charge();
+        } else {
+          this.touchFirePrimary = true;
+        }
+      },
+      { passive: false }
+    );
+
+    btnFire?.addEventListener(
+      "touchmove",
+      (e) => {
+        e.preventDefault();
+        for (let i = 0; i < e.changedTouches.length; i++) {
+          const t = e.changedTouches[i];
+          if (t.identifier === this.fireTouchId) {
+            const dx = t.clientX - this.fireLastX;
+            const dy = t.clientY - this.fireLastY;
+            this.fireLastX = t.clientX;
+            this.fireLastY = t.clientY;
+            const sens = getTouchLookSens() * 0.85;
+            this.applyLookDelta(-dx * sens, -dy * sens);
+            break;
+          }
+        }
+      },
+      { passive: false }
+    );
+
+    const onFireEnd = (e: TouchEvent) => {
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        if (e.changedTouches[i].identifier === this.fireTouchId) {
+          this.fireTouchId = null;
+          this.touchFirePrimary = false;
+          btnFire?.classList.remove("active-hold");
+          break;
+        }
+      }
+    };
+    btnFire?.addEventListener("touchend", onFireEnd);
+    btnFire?.addEventListener("touchcancel", onFireEnd);
+
+    // 4. Infantry ADS / Detonate C4, Reload, Jump, Crouch, Enter Vehicle
+    const btnAds = document.getElementById("btn-touch-ads");
+    btnAds?.addEventListener("touchstart", (e) => {
+      e.preventDefault();
+      if (this.activeSlot === 4) {
+        this.detonateC4Charges();
+      } else {
+        this.touchAdsToggled = !this.touchAdsToggled;
+        btnAds.classList.toggle("toggled", this.touchAdsToggled);
+      }
+    });
+
+    document.getElementById("btn-touch-reload")?.addEventListener("touchstart", (e) => {
+      e.preventDefault();
+      this.tryResupply(true);
+      this.startReload();
+    });
+
+    document.getElementById("btn-touch-jump")?.addEventListener("touchstart", (e) => {
+      e.preventDefault();
+      this.touchJumpQueued = true;
+    });
+
+    const btnCrouch = document.getElementById("btn-touch-crouch");
+    btnCrouch?.addEventListener("touchstart", (e) => {
+      e.preventDefault();
+      this.isCrouching = !this.isCrouching;
+      btnCrouch.classList.toggle("toggled", this.isCrouching);
+    });
+
+    document.getElementById("btn-touch-enter")?.addEventListener("touchstart", (e) => {
+      e.preventDefault();
+      this.toggleVehicleEnterExit();
+    });
+
+    // 5. Vehicle Touch Buttons
+    const bindHold = (id: string, onChange: (down: boolean) => void) => {
+      const el = document.getElementById(id);
+      el?.addEventListener(
+        "touchstart",
+        (e) => {
+          e.preventDefault();
+          el.classList.add("active-hold");
+          onChange(true);
+        },
+        { passive: false }
+      );
+      const stop = () => {
+        el?.classList.remove("active-hold");
+        onChange(false);
+      };
+      el?.addEventListener("touchend", stop);
+      el?.addEventListener("touchcancel", stop);
+    };
+
+    bindHold("btn-veh-fire1", (d) => (this.touchFirePrimary = d));
+    bindHold("btn-veh-fire2", (d) => (this.touchFireSecondary = d));
+    bindHold("btn-veh-up", (d) => (this.touchVehUp = d));
+
+    document.getElementById("btn-veh-cam")?.addEventListener("touchstart", (e) => {
+      e.preventDefault();
+      this.vehicleThirdPerson = !this.vehicleThirdPerson;
+    });
+
+    document.getElementById("btn-veh-exit")?.addEventListener("touchstart", (e) => {
+      e.preventDefault();
+      this.exitVehicle();
     });
   }
 
   public requestLock(): void {
     this.sfx.unlock();
-    this.domElement.requestPointerLock?.();
+    if (this.isTouchMode) return;
+    try {
+      this.domElement.requestPointerLock?.();
+    } catch {
+      // Ignore on browsers that restrict pointer lock
+    }
   }
 
   public spawnAt(pos: THREE.Vector3, lookYaw = 0): void {
@@ -305,8 +664,10 @@ export class PlayerController implements DamageableActor {
     this.yaw = lookYaw;
     this.pitch = 0;
     this.isCrouching = false;
+    this.touchAdsToggled = false;
+    document.getElementById("btn-touch-ads")?.classList.remove("toggled");
+    document.getElementById("btn-touch-crouch")?.classList.remove("toggled");
 
-    // Refill full tactical ammo on fresh deployment
     for (const s of [1, 2, 3, 4] as const) {
       const w = this.slots[s];
       w.mag = w.maxMag;
@@ -314,6 +675,7 @@ export class PlayerController implements DamageableActor {
       if (w.warheadMesh) w.warheadMesh.visible = true;
     }
     this.equipSlot(1);
+    this.syncTouchVehicleMode();
     this.requestLock();
   }
 
@@ -322,7 +684,18 @@ export class PlayerController implements DamageableActor {
     this.isReloading = false;
     this.reloadTimer = 0;
     this.adsBlend = 0;
+    this.touchAdsToggled = false;
     this.isScoped8x = false;
+
+    const btnAds = document.getElementById("btn-touch-ads");
+    const btnFire = document.getElementById("btn-touch-fire");
+    if (btnAds) {
+      btnAds.classList.remove("toggled");
+      btnAds.textContent = slot === 4 ? "引爆" : "瞄准";
+    }
+    if (btnFire) {
+      btnFire.textContent = slot === 4 ? "投C4" : "开火";
+    }
 
     for (const s of [1, 2, 3, 4] as const) {
       const w = this.slots[s];
@@ -330,12 +703,22 @@ export class PlayerController implements DamageableActor {
       if (w.magMesh) w.magMesh.position.y = w.magRestY;
     }
     this.activeSlot = slot;
-    // Show tactical hands on rifles/launchers/clacker
     this.armsRig.visible = slot !== 4;
     this.sfx.playReloadClick();
   }
 
-  private toggleVehicleEnterExit(): void {
+  private syncTouchVehicleMode(): void {
+    const infCluster = document.getElementById("touch-infantry-btns");
+    const vehCluster = document.getElementById("touch-vehicle-btns");
+    const inVeh = Boolean(this.activeVehicle);
+    infCluster?.classList.toggle("hidden", inVeh);
+    vehCluster?.classList.toggle("hidden", !inVeh);
+    this.touchFirePrimary = false;
+    this.touchFireSecondary = false;
+    this.touchVehUp = false;
+  }
+
+  public toggleVehicleEnterExit(): void {
     if (this.activeVehicle) {
       this.exitVehicle();
       return;
@@ -344,11 +727,13 @@ export class PlayerController implements DamageableActor {
     if (v) {
       this.activeVehicle = v;
       v.driverId = "PLAYER";
-      v.team = "NATO"; // Hijacking enemy PAX vehicle flips its IFF while piloted!
+      v.team = "NATO";
       this.viewmodelRoot.visible = false;
       this.isScoped8x = false;
+      this.touchAdsToggled = false;
       this.mouseLeft = false;
       this.mouseRight = false;
+      this.syncTouchVehicleMode();
       this.sfx.playReloadClick();
     }
   }
@@ -365,6 +750,7 @@ export class PlayerController implements DamageableActor {
     this.velocity.set(0, 0, 0);
     this.activeVehicle = null;
     this.viewmodelRoot.visible = true;
+    this.syncTouchVehicleMode();
   }
 
   public getActiveWeapon(): WeaponSlotState {
@@ -389,7 +775,6 @@ export class PlayerController implements DamageableActor {
 
   public takeDamage(amount: number, _attackerTeam: Team, _weaponName: string): void {
     if (!this.deployed || this.hp <= 0) return;
-    // If inside an armored vehicle, hull absorbs incoming fire until vehicle explodes!
     if (this.activeVehicle && this.activeVehicle.isAlive()) {
       return;
     }
@@ -414,6 +799,8 @@ export class PlayerController implements DamageableActor {
     this.isReloading = true;
     this.reloadTimer = w.reloadDuration;
     this.isScoped8x = false;
+    this.touchAdsToggled = false;
+    document.getElementById("btn-touch-ads")?.classList.remove("toggled");
     this.sfx.playReloadClick();
 
     const relAct = this.armsActions.get("FPS_Reload_Tactical");
@@ -490,7 +877,6 @@ export class PlayerController implements DamageableActor {
     w.mag--;
     this.fireCooldown = 60.0 / w.rpm;
 
-    // Play viewmodel recoil clip & bolt kick
     const fireAct = this.armsActions.get("FPS_Fire_Recoil");
     if (fireAct) {
       fireAct.reset().setLoop(THREE.LoopOnce, 1).play();
@@ -499,7 +885,6 @@ export class PlayerController implements DamageableActor {
       w.boltMesh.position.z = w.boltRestZ + 0.055;
     }
 
-    // Muzzle flash
     this.muzzleFlashTimer = 0.042;
     if (w.muzzleSocket) {
       const mPos = new THREE.Vector3();
@@ -514,7 +899,6 @@ export class PlayerController implements DamageableActor {
     this.muzzleFlashMesh.rotation.z = Math.random() * Math.PI;
     this.muzzleLight.intensity = 3.2;
 
-    // True center-screen ballistic aim direction + subtle hipfire spread
     const aimDir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion).normalize();
     const spreadAmt = this.adsBlend > 0.75 ? 0.0018 : 0.018;
     const dir = aimDir
@@ -531,7 +915,6 @@ export class PlayerController implements DamageableActor {
     const origin = this.camera.position.clone().addScaledVector(aimDir, 0.35);
 
     if (this.activeSlot === 1) {
-      // M5A3 Assault Rifle
       this.sfx.playRifleShot(1.0, 0.28);
       this.recoilKickPos = 0.022;
       this.recoilKickPitch = 0.011;
@@ -548,7 +931,6 @@ export class PlayerController implements DamageableActor {
         damage: 34,
       });
     } else if (this.activeSlot === 2) {
-      // RPG-7V2 Rocket Launcher (Breaches Concrete Wall Chunks & Destroys Tanks!)
       this.sfx.playRocketLaunch();
       if (w.warheadMesh) w.warheadMesh.visible = false;
       this.recoilKickPos = 0.065;
@@ -574,7 +956,6 @@ export class PlayerController implements DamageableActor {
         }, 320);
       }
     } else if (this.activeSlot === 3) {
-      // M2010 .300 WinMag Sniper Rifle
       this.sfx.playSniperShot();
       this.recoilKickPos = 0.055;
       this.recoilKickPitch = 0.038;
@@ -601,14 +982,16 @@ export class PlayerController implements DamageableActor {
 
   public buildVehicleInput(): VehicleInputState | null {
     if (!this.activeVehicle) return null;
-    const forward = (this.keys.has("KeyW") ? 1 : 0) - (this.keys.has("KeyS") ? 1 : 0);
-    const turn = (this.keys.has("KeyA") ? 1 : 0) - (this.keys.has("KeyD") ? 1 : 0);
+    const kbFwd = (this.keys.has("KeyW") ? 1 : 0) - (this.keys.has("KeyS") ? 1 : 0);
+    const kbTurn = (this.keys.has("KeyA") ? 1 : 0) - (this.keys.has("KeyD") ? 1 : 0);
+    const forward = THREE.MathUtils.clamp(kbFwd + -this.joyY, -1, 1);
+    const turn = THREE.MathUtils.clamp(kbTurn + -this.joyX, -1, 1);
     return {
       forward,
       turn,
-      up: this.keys.has("Space"),
-      firePrimary: this.mouseLeft,
-      fireSecondary: this.mouseRight,
+      up: this.keys.has("Space") || this.touchVehUp,
+      firePrimary: this.mouseLeft || this.touchFirePrimary,
+      fireSecondary: this.mouseRight || this.touchFireSecondary,
     };
   }
 
@@ -651,29 +1034,41 @@ export class PlayerController implements DamageableActor {
 
     // Infantry proximity checks (vehicles & auto-resupply crates)
     this.nearbyVehicle = this.vehicles.findEnterableVehicle(this.position, 5.2);
+    document.getElementById("btn-touch-enter")?.classList.toggle("hidden", !this.nearbyVehicle);
     this.tryResupply(false);
 
-    // 1. Infantry Movement (WASD + Sprint + Jump + Crouch)
-    const inFwd = (this.keys.has("KeyW") ? 1 : 0) - (this.keys.has("KeyS") ? 1 : 0);
-    const inRight = (this.keys.has("KeyD") ? 1 : 0) - (this.keys.has("KeyA") ? 1 : 0);
-    const wantsSprint = this.keys.has("ShiftLeft") && inFwd > 0 && !this.mouseRight && !this.isReloading;
+    // 1. Infantry Movement (Keyboard WASD + Mobile Analog Joystick)
+    const kbFwd = (this.keys.has("KeyW") ? 1 : 0) - (this.keys.has("KeyS") ? 1 : 0);
+    const kbRight = (this.keys.has("KeyD") ? 1 : 0) - (this.keys.has("KeyA") ? 1 : 0);
+    const inFwd = THREE.MathUtils.clamp(kbFwd + -this.joyY, -1, 1);
+    const inRight = THREE.MathUtils.clamp(kbRight + this.joyX, -1, 1);
+    const joyMag = Math.min(1, Math.hypot(inFwd, inRight));
+
+    const wantsAds = (this.mouseRight || this.touchAdsToggled) && !this.isReloading && this.activeSlot !== 4;
+    const autoTouchSprint = this.isTouchMode && -this.joyY > 0.82 && joyMag > 0.86 && !this.touchFirePrimary;
+    const wantsSprint = (this.keys.has("ShiftLeft") || autoTouchSprint) && inFwd > 0.3 && !wantsAds && !this.isReloading;
     this.isSprinting = wantsSprint;
-    if (wantsSprint) this.isCrouching = false;
+    if (wantsSprint && this.isCrouching) {
+      this.isCrouching = false;
+      document.getElementById("btn-touch-crouch")?.classList.remove("toggled");
+    }
 
     const fwdVec = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
     const rightVec = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
     const moveDir = new THREE.Vector3().addScaledVector(fwdVec, inFwd).addScaledVector(rightVec, inRight);
-    if (moveDir.lengthSq() > 1e-4) moveDir.normalize();
+    if (moveDir.lengthSq() > 1.0) moveDir.normalize();
 
     const baseSpeed = this.isSprinting ? 7.3 : this.isCrouching ? 3.1 : this.adsBlend > 0.5 ? 3.5 : 5.1;
     this.velocity.x = moveDir.x * baseSpeed;
     this.velocity.z = moveDir.z * baseSpeed;
 
-    if (this.keys.has("Space") && this.grounded) {
+    if ((this.keys.has("Space") || this.touchJumpQueued) && this.grounded) {
       this.velocity.y = 7.4;
       this.grounded = false;
       this.isCrouching = false;
+      document.getElementById("btn-touch-crouch")?.classList.remove("toggled");
     }
+    this.touchJumpQueued = false;
     this.velocity.y -= 21.0 * dt;
 
     const colRes = this.physics.resolveCharacterMovement(
@@ -689,10 +1084,10 @@ export class PlayerController implements DamageableActor {
     // 2. Reload & Weapon Firing
     this.fireCooldown = Math.max(0, this.fireCooldown - dt);
     const w = this.getActiveWeapon();
+    const wantsFire = this.mouseLeft || this.touchFirePrimary;
 
     if (this.isReloading) {
       this.reloadTimer -= dt;
-      // Animate detachable magazine drop & slap-in!
       if (w.magMesh) {
         const phase = 1.0 - this.reloadTimer / w.reloadDuration;
         const drop = phase < 0.5 ? Math.sin(phase * Math.PI * 2) * 0.16 : 0;
@@ -701,21 +1096,24 @@ export class PlayerController implements DamageableActor {
       if (this.reloadTimer <= 0) {
         this.finishReload();
       }
-    } else if (this.mouseLeft && this.fireCooldown <= 0 && this.activeSlot !== 4) {
-      // Automatic fire on M5A3; single-shot trigger reset on RPG/Sniper still feels responsive with cooldown
+    } else if (wantsFire && this.fireCooldown <= 0 && this.activeSlot !== 4) {
       this.fireCurrentWeapon();
       if (this.activeSlot !== 1) {
         this.mouseLeft = false;
+        this.touchFirePrimary = false;
       }
     }
 
     // 3. ADS Optic Interpolation & 8x Sniper Scope Toggle
-    const targetAds = this.mouseRight && !this.isReloading && this.activeSlot !== 4 ? 1.0 : 0.0;
+    const targetAds = wantsAds ? 1.0 : 0.0;
     this.adsBlend = THREE.MathUtils.lerp(this.adsBlend, targetAds, Math.min(1, dt * 13));
     this.isScoped8x = this.activeSlot === 3 && this.adsBlend > 0.82;
     this.viewmodelRoot.visible = !this.isScoped8x;
 
-    const targetFov = THREE.MathUtils.lerp(this.isSprinting ? 80 : 74, w.adsFov, this.adsBlend);
+    // Slightly wider base FOV in narrow portrait mobile screens so battlefield visibility stays generous
+    const portraitBonus = this.camera.aspect < 0.85 ? 8 : 0;
+    const baseFov = (this.isSprinting ? 80 : 74) + portraitBonus;
+    const targetFov = THREE.MathUtils.lerp(baseFov, w.adsFov, this.adsBlend);
     if (Math.abs(this.camera.fov - targetFov) > 0.05) {
       this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, Math.min(1, dt * 14));
       this.camera.updateProjectionMatrix();
@@ -759,6 +1157,10 @@ export class PlayerController implements DamageableActor {
     }
 
     const vmPos = new THREE.Vector3().lerpVectors(w.hipPos, w.adsPos, this.adsBlend);
+    // Slightly pull viewmodel inward on narrow portrait phones so rifle sight isn't clipped on the right edge
+    if (this.camera.aspect < 0.85 && this.adsBlend < 0.5) {
+      vmPos.x *= 0.62;
+    }
     const bobAmp = horizSpd > 0.5 ? (1 - this.adsBlend * 0.88) * 0.012 : 0.002;
     vmPos.x += Math.cos(this.walkBobTime * 0.5) * bobAmp;
     vmPos.y += Math.abs(Math.sin(this.walkBobTime * 0.5)) * bobAmp - (this.isSprinting ? 0.035 : 0);

@@ -13,6 +13,7 @@ A Battlefield 6-inspired tactical combined-arms Conquest prototype built with **
   - 3 capturable Conquest sectors (`ALPHA`, `BRAVO`, `CHARLIE`) with faction ticket bleed (`300 vs 300`).
   - Real-time wall chunk breaching, flying rigid-body debris, persistent ground rubble piles, and sticky C4 on moving vehicles.
   - 18 autonomous skinned AI soldiers (`NATO` vs `PAX`) + enemy tank patrol + procedural WebAudio gunfire/explosion synthesis.
+  - **Responsive Desktop & Mobile Browser Support**: Full multi-touch twin-stick controls (virtual movement thumbstick + auto-sprint, right-screen look + hold-and-drag fire, tappable weapon slots, dedicated vehicle touch HUD, `100dvh` & safe-area-inset adaptation for portrait/landscape smartphones).
 
 ## Quick Start
 

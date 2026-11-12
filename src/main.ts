@@ -23,14 +23,25 @@ async function bootstrap(): Promise<void> {
   const btnOutpost = document.getElementById("btn-deploy-outpost") as HTMLButtonElement;
 
   // 1. Renderer, Atmospheric Desert-Urban Sky & Directional Sun Shadow Rig
-  const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  const isCoarseMobile = window.matchMedia?.("(pointer: coarse)").matches || window.innerWidth <= 860;
+  const renderer = new THREE.WebGLRenderer({ antialias: !isCoarseMobile, powerPreference: "high-performance" });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, isCoarseMobile ? 1.5 : 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.12;
   container.appendChild(renderer.domElement);
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen?.().catch(() => {});
+    } else {
+      document.exitFullscreen?.().catch(() => {});
+    }
+  };
+  document.getElementById("btn-fullscreen-deploy")?.addEventListener("click", toggleFullscreen);
+  document.getElementById("btn-fullscreen-hud")?.addEventListener("click", toggleFullscreen);
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x9dc0d8);
@@ -46,7 +57,8 @@ async function bootstrap(): Promise<void> {
   const sunLight = new THREE.DirectionalLight(0xfff1d8, 2.35);
   sunLight.position.set(45, 68, 38);
   sunLight.castShadow = true;
-  sunLight.shadow.mapSize.set(2048, 2048);
+  const shadowRes = isCoarseMobile ? 1024 : 2048;
+  sunLight.shadow.mapSize.set(shadowRes, shadowRes);
   sunLight.shadow.camera.near = 5;
   sunLight.shadow.camera.far = 185;
   const shadowExtent = 58;

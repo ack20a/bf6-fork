@@ -2,7 +2,10 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
     <title>BF6: OUTPOST CONQUEST — Tactical WebGPU/Three.js Prototype</title>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
@@ -12,9 +15,12 @@
     <!-- Loading & Tactical Deployment Overlay -->
     <div id="deploy-screen" class="overlay active">
       <div class="deploy-panel">
-        <div class="bf-tag">CONQUEST LARGE // 64P TACTICAL SANDBOX</div>
+        <div class="deploy-top-row">
+          <div class="bf-tag">CONQUEST LARGE // 64P TACTICAL SANDBOX</div>
+          <button id="btn-fullscreen-deploy" class="fs-btn" type="button">⛶ 全屏</button>
+        </div>
         <h1>BATTLEFIELD <span>OUTPOST ALPHA</span></h1>
-        <p class="subtitle">模块化分块建筑破坏 · 步坦空协同作战 · 征服夺旗原型</p>
+        <p class="subtitle">模块化分块建筑破坏 · 步坦空协同作战 · 征服夺旗原型（支持键鼠与触屏双摇杆）</p>
 
         <div id="loading-box">
           <div class="progress-track">
@@ -23,31 +29,31 @@
           <div id="loading-text">正在加载 29 个 Blender .glb 战术资产 (0%)...</div>
         </div>
 
+        <div class="spawn-row">
+          <button id="btn-deploy-hq" class="deploy-btn" disabled>部署：联军基地 (坦克/小鸟直升机车库)</button>
+          <button id="btn-deploy-outpost" class="deploy-btn secondary" disabled>空降：Alpha 前哨站前线</button>
+        </div>
+
         <div id="controls-grid" class="controls-grid">
           <div class="ctrl-card">
-            <h3>步兵战术操作</h3>
+            <h3>步兵战术操作（PC / 移动端）</h3>
             <ul>
-              <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 移动 / <kbd>Shift</kbd> 战术冲刺</li>
-              <li><kbd>Space</kbd> 跳跃 / <kbd>C</kbd> 蹲姿掩体射击</li>
+              <li><strong>移动端</strong>：左摇杆移动（推到底自动冲刺），右半屏滑动瞄准，右侧按键开火/开镜/换弹/切枪</li>
+              <li><strong>桌面端</strong>：<kbd>WASD</kbd> 移动 <kbd>Shift</kbd> 冲刺 <kbd>Space</kbd> 跳 <kbd>C</kbd> 蹲</li>
               <li><kbd>左键</kbd> 开火·投掷C4 / <kbd>右键</kbd> 全息·8倍镜瞄准 / 引爆C4</li>
               <li><kbd>1</kbd> M5A3步枪 <kbd>2</kbd> RPG火箭筒 <kbd>3</kbd> M2010狙击 <kbd>4</kbd> C4炸药</li>
-              <li><kbd>R</kbd> 换弹 / <kbd>F</kbd> 弹药箱补给 / <kbd>E</kbd> 进出坦克·直升机·装甲车</li>
+              <li><kbd>R</kbd> 换弹 / <kbd>F</kbd> 弹药箱补给 / <kbd>E</kbd> 进出载具</li>
             </ul>
           </div>
           <div class="ctrl-card">
             <h3>陆空载具驾驶</h3>
             <ul>
-              <li><strong>M1A2 主战坦克</strong>：<kbd>W/S</kbd> 推进 <kbd>A/D</kbd> 转向，鼠标转炮塔，<kbd>左键</kbd> 120mm破甲榴弹（炸墙/反载具），<kbd>右键</kbd> 同轴重机枪</li>
-              <li><strong>AH-6J 小鸟直升机</strong>：<kbd>W/S</kbd> 升降油门 <kbd>A/D</kbd> 尾桨偏航，鼠标俯仰横滚，<kbd>Space</kbd> 自动悬停改平，<kbd>左键</kbd> 双联加特林，<kbd>右键</kbd> 70mm火箭弹齐射</li>
-              <li><strong>LATV4 装甲侦察车</strong>：<kbd>WASD</kbd> 越野驾驶，<kbd>左键</kbd> 车顶 .50 重机枪</li>
-              <li>载具内按 <kbd>V</kbd> 切换第一/第三人称视角，按 <kbd>E</kbd> 下车</li>
+              <li><strong>M1A2 主战坦克</strong>：左摇杆/<kbd>WASD</kbd> 推进转向，右屏/鼠标转炮塔，主武器 120mm 破墙榴弹，副武器重机枪</li>
+              <li><strong>AH-6J 小鸟直升机</strong>：左摇杆/<kbd>W/S</kbd> 升降 <kbd>A/D</kbd> 偏航，右屏/鼠标俯仰横滚，悬停键改平，加特林 + 火箭巢</li>
+              <li><strong>LATV4 装甲侦察车</strong>：越野高速机动 + 车顶 .50 重机枪</li>
+              <li>支持随时切换 <strong>1P / 3P 视角</strong> 与一键下车</li>
             </ul>
           </div>
-        </div>
-
-        <div class="spawn-row">
-          <button id="btn-deploy-hq" class="deploy-btn" disabled>部署：联军基地 (坦克/小鸟直升机车库)</button>
-          <button id="btn-deploy-outpost" class="deploy-btn secondary" disabled>空降：Alpha 前哨站前线</button>
         </div>
       </div>
     </div>
@@ -95,7 +101,10 @@
 
       <!-- Top-Right Killfeed & FPS Telemetry -->
       <div class="top-right-panel">
-        <div id="perf-badge" class="perf-badge">WebGPU/WebGL2 · 60 FPS</div>
+        <div class="top-right-bar">
+          <div id="perf-badge" class="perf-badge">Three.js PBR · 60 FPS</div>
+          <button id="btn-fullscreen-hud" class="fs-btn compact" type="button">⛶</button>
+        </div>
         <div id="killfeed" class="killfeed"></div>
       </div>
 
@@ -112,13 +121,15 @@
         <span class="hm-2"></span>
       </div>
 
-      <!-- Interaction Prompt -->
-      <div id="interact-prompt" class="interact-prompt hidden">[E] 驾驶 M1A2 AbramsX 主战坦克</div>
+      <!-- Interaction Prompt (Tappable on Mobile!) -->
+      <button id="interact-prompt" class="interact-prompt hidden" type="button">
+        [E] 驾驶 M1A2 AbramsX 主战坦克
+      </button>
 
       <!-- Score / Event Popup Stack -->
       <div id="score-feed" class="score-feed"></div>
 
-      <!-- Bottom-Left Tactical Minimap -->
+      <!-- Tactical Minimap -->
       <div class="minimap-panel">
         <div class="minimap-header">
           <span id="compass-heading">HDG 000° N</span>
@@ -127,7 +138,7 @@
         <canvas id="minimap-canvas" width="190" height="190"></canvas>
       </div>
 
-      <!-- Bottom-Right Weapon / Vehicle Status Panel -->
+      <!-- Weapon / Vehicle Status Panel -->
       <div class="status-panel">
         <div id="vehicle-hud" class="vehicle-hud hidden">
           <div class="veh-name" id="veh-hud-name">M1A2 ABRAMSX</div>
@@ -135,29 +146,63 @@
             <span id="veh-hud-speed">SPD 00 KM/H</span>
             <span id="veh-hud-hp">ARMOR 100%</span>
           </div>
-          <div class="veh-hint">[左键] 主武器 · [右键] 副武器 · [V] 切换视角 · [E] 离开载具</div>
+          <div class="veh-hint">[左键/主武] 主炮 · [右键/副武] 机枪/火箭 · [V] 视角 · [E] 下车</div>
         </div>
 
-        <div class="ammo-block">
-          <span id="ammo-mag" class="ammo-mag">30</span>
-          <span class="ammo-sep">/</span>
-          <span id="ammo-res" class="ammo-res">150</span>
-          <div id="weapon-name" class="weapon-name">M5A3 TACTICAL CARBINE</div>
-        </div>
-
-        <div class="health-row">
-          <span class="hp-label">HP</span>
-          <div class="hp-bar-bg">
-            <div id="hp-bar-fill" class="hp-bar-fill"></div>
+        <div class="ammo-hp-wrap">
+          <div class="ammo-block">
+            <span id="ammo-mag" class="ammo-mag">30</span>
+            <span class="ammo-sep">/</span>
+            <span id="ammo-res" class="ammo-res">150</span>
+            <div id="weapon-name" class="weapon-name">M5A3 TACTICAL CARBINE</div>
           </div>
-          <span id="hp-num" class="hp-num">100</span>
+
+          <div class="health-row">
+            <span class="hp-label">HP</span>
+            <div class="hp-bar-bg">
+              <div id="hp-bar-fill" class="hp-bar-fill"></div>
+            </div>
+            <span id="hp-num" class="hp-num">100</span>
+          </div>
         </div>
 
         <div class="slots-row">
-          <div id="slot-1" class="slot-item active"><kbd>1</kbd> M5A3</div>
-          <div id="slot-2" class="slot-item"><kbd>2</kbd> RPG-7</div>
-          <div id="slot-3" class="slot-item"><kbd>3</kbd> M2010</div>
-          <div id="slot-4" class="slot-item"><kbd>4</kbd> C4</div>
+          <button id="slot-1" class="slot-item active" type="button"><kbd>1</kbd> M5A3</button>
+          <button id="slot-2" class="slot-item" type="button"><kbd>2</kbd> RPG-7</button>
+          <button id="slot-3" class="slot-item" type="button"><kbd>3</kbd> M2010</button>
+          <button id="slot-4" class="slot-item" type="button"><kbd>4</kbd> C4</button>
+        </div>
+      </div>
+
+      <!-- Mobile / Touch Twin-Stick & Tactical Action Overlay -->
+      <div id="touch-ui" class="touch-ui hidden">
+        <!-- Full-screen Look Touch Surface (Right side + free area) -->
+        <div id="touch-look-zone" class="touch-look-zone"></div>
+
+        <!-- Left Virtual Thumbstick -->
+        <div id="touch-joystick-zone" class="touch-joystick-zone">
+          <div id="touch-joystick-base" class="touch-joystick-base">
+            <div id="touch-joystick-stick" class="touch-joystick-stick"></div>
+          </div>
+        </div>
+
+        <!-- Right Tactical Combat Buttons (Infantry Mode) -->
+        <div id="touch-infantry-btns" class="touch-action-cluster">
+          <button id="btn-touch-enter" class="t-btn accent hidden" type="button">驾驶载具</button>
+          <button id="btn-touch-fire" class="t-btn fire" type="button">开火</button>
+          <button id="btn-touch-ads" class="t-btn ads" type="button">瞄准</button>
+          <button id="btn-touch-reload" class="t-btn reload" type="button">换弹</button>
+          <button id="btn-touch-jump" class="t-btn jump" type="button">跳</button>
+          <button id="btn-touch-crouch" class="t-btn crouch" type="button">蹲</button>
+        </div>
+
+        <!-- Right Vehicle Controls Cluster (Tank / Heli / LATV Mode) -->
+        <div id="touch-vehicle-btns" class="touch-action-cluster vehicle-mode hidden">
+          <button id="btn-veh-fire1" class="t-btn fire" type="button">主武器</button>
+          <button id="btn-veh-fire2" class="t-btn ads" type="button">副武器</button>
+          <button id="btn-veh-up" class="t-btn jump" type="button">悬停</button>
+          <button id="btn-veh-cam" class="t-btn reload" type="button">视角</button>
+          <button id="btn-veh-exit" class="t-btn accent exit" type="button">下车</button>
         </div>
       </div>
     </div>
