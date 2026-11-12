@@ -154,7 +154,7 @@ export class CombatVehicle implements DamageableActor {
       destroyed: false,
     };
     this.updateStickyCollider();
-    this.physics.colliders.push(this.stickyCol);
+    this.physics.addDynamicCollider(this.stickyCol);
     this.physics.actors.push(this);
   }
 
@@ -305,8 +305,8 @@ export class CombatVehicle implements DamageableActor {
   }
 
   private updateGroundDrive(dt: number, input: VehicleInputState): void {
-    const maxSpd = this.kind === "mbt" ? 12.5 : 22.5;
-    const accel = this.kind === "mbt" ? 16.0 : 28.0;
+    const maxSpd = this.kind === "mbt" ? 14.8 : 26.5;
+    const accel = this.kind === "mbt" ? 18.0 : 32.0;
     const turnRate = this.kind === "mbt" ? 1.15 : 1.95;
 
     // Hull steering (MBT can pivot-steer in place; LATV steers faster with speed)
@@ -328,12 +328,14 @@ export class CombatVehicle implements DamageableActor {
 
     // Move & collide against intact buildings/barriers (MBT crushes destructible walls on ram!)
     const nextPos = this.root.position.clone().addScaledVector(this.velocity, dt);
-    nextPos.x = THREE.MathUtils.clamp(nextPos.x, -90, 90);
-    nextPos.z = THREE.MathUtils.clamp(nextPos.z, -90, 90);
+    nextPos.x = THREE.MathUtils.clamp(nextPos.x, -212, 212);
+    nextPos.z = THREE.MathUtils.clamp(nextPos.z, -212, 212);
     nextPos.y = 0;
 
     const rad = this.getHitRadius() * 0.85;
-    for (const c of this.physics.colliders) {
+    const nearCols = this.physics.queryNearbyColliders(nextPos.x - rad, nextPos.z - rad, nextPos.x + rad, nextPos.z + rad);
+    for (let i = 0; i < nearCols.length; i++) {
+      const c = nearCols[i];
       if (c.destroyed || c.id === this.stickyCol.id) continue;
       if (c.box.max.y < 0.45 || c.box.min.y > 2.4) continue;
 
@@ -473,16 +475,16 @@ export class CombatVehicle implements DamageableActor {
     const fwd = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
     const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
 
-    this.velocity.addScaledVector(fwd, -this.pitch * 36.0 * dt);
-    this.velocity.addScaledVector(right, -this.roll * 28.0 * dt);
+    this.velocity.addScaledVector(fwd, -this.pitch * 42.0 * dt);
+    this.velocity.addScaledVector(right, -this.roll * 32.0 * dt);
     // Air drag
-    this.velocity.x *= Math.max(0, 1 - dt * 1.15);
-    this.velocity.z *= Math.max(0, 1 - dt * 1.15);
+    this.velocity.x *= Math.max(0, 1 - dt * 1.12);
+    this.velocity.z *= Math.max(0, 1 - dt * 1.12);
 
     this.root.position.addScaledVector(this.velocity, dt);
-    this.root.position.x = THREE.MathUtils.clamp(this.root.position.x, -95, 95);
-    this.root.position.z = THREE.MathUtils.clamp(this.root.position.z, -95, 95);
-    this.root.position.y = THREE.MathUtils.clamp(this.root.position.y, 0.0, 48.0);
+    this.root.position.x = THREE.MathUtils.clamp(this.root.position.x, -238, 238);
+    this.root.position.z = THREE.MathUtils.clamp(this.root.position.z, -238, 238);
+    this.root.position.y = THREE.MathUtils.clamp(this.root.position.y, 0.0, 75.0);
 
     if (this.root.position.y <= 0.01 && this.velocity.y < 0) {
       this.root.position.y = 0;
@@ -641,80 +643,101 @@ export class VehicleManager {
   ) {}
 
   public spawnInitialVehicles(): void {
-    // NATO Vehicles (Motor Pool HQ & Forward Outpost Road)
-    this.vehicles.push(
-      new CombatVehicle(
-        {
-          id: "VEH_NATO_MBT",
-          displayName: "M1A2 ABRAMSX 主战坦克",
-          kind: "mbt",
-          team: "NATO",
-          position: new THREE.Vector3(-12, 0, 44),
-          yaw: 0,
-        },
-        this.scene,
-        this.assets,
-        this.physics,
-        this.sfx
-      ),
-      new CombatVehicle(
-        {
-          id: "VEH_NATO_HELI",
-          displayName: "AH-6J LITTLE BIRD 武装小鸟",
-          kind: "heli",
-          team: "NATO",
-          position: new THREE.Vector3(7.5, 0, 52),
-          yaw: 0,
-        },
-        this.scene,
-        this.assets,
-        this.physics,
-        this.sfx
-      ),
-      new CombatVehicle(
-        {
-          id: "VEH_NATO_LATV_FWD",
-          displayName: "LATV4 装甲突击侦察车",
-          kind: "latv",
-          team: "NATO",
-          position: new THREE.Vector3(-6.5, 0, 22.5),
-          yaw: -0.15,
-        },
-        this.scene,
-        this.assets,
-        this.physics,
-        this.sfx
-      ),
-      // Enemy PAX Vehicles (North Axis — destroyable with RPG/C4/Tank or hijackable!)
-      new CombatVehicle(
-        {
-          id: "VEH_PAX_MBT",
-          displayName: "PAX 敌军主战坦克",
-          kind: "mbt",
-          team: "PAX",
-          position: new THREE.Vector3(-12, 0, -36),
-          yaw: Math.PI,
-        },
-        this.scene,
-        this.assets,
-        this.physics,
-        this.sfx
-      ),
-      new CombatVehicle(
-        {
-          id: "VEH_PAX_LATV",
-          displayName: "PAX 侦察装甲车",
-          kind: "latv",
-          team: "PAX",
-          position: new THREE.Vector3(24, 0, -14),
-          yaw: Math.PI * 0.85,
-        },
-        this.scene,
-        this.assets,
-        this.physics,
-        this.sfx
-      )
-    );
+    // 1. NATO South Main Operating Base (Z = +168) + Forward Sector Motor Pools
+    const roster: Array<{
+      id: string;
+      displayName: string;
+      kind: VehicleKind;
+      team: Team;
+      position: THREE.Vector3;
+      yaw: number;
+    }> = [
+      {
+        id: "VEH_NATO_MBT_HQ",
+        displayName: "M1A2 ABRAMSX 主战坦克",
+        kind: "mbt",
+        team: "NATO",
+        position: new THREE.Vector3(-12, 0, 162),
+        yaw: 0,
+      },
+      {
+        id: "VEH_NATO_HELI_HQ",
+        displayName: "AH-6J LITTLE BIRD 武装小鸟",
+        kind: "heli",
+        team: "NATO",
+        position: new THREE.Vector3(18, 0, 168),
+        yaw: 0,
+      },
+      {
+        id: "VEH_NATO_LATV_HQ",
+        displayName: "LATV4 基地突击车",
+        kind: "latv",
+        team: "NATO",
+        position: new THREE.Vector3(3, 0, 160),
+        yaw: 0.1,
+      },
+      {
+        id: "VEH_NATO_MBT_ECHO",
+        displayName: "M1A2 ABRAMSX 前线重坦",
+        kind: "mbt",
+        team: "NATO",
+        position: new THREE.Vector3(-15, 0, 74),
+        yaw: 0,
+      },
+      {
+        id: "VEH_NATO_LATV_ALPHA",
+        displayName: "LATV4 装甲突击侦察车",
+        kind: "latv",
+        team: "NATO",
+        position: new THREE.Vector3(-8, 0, 29),
+        yaw: -0.15,
+      },
+      {
+        id: "VEH_NATO_LATV_CHARLIE",
+        displayName: "LATV4 绿洲机动装甲车",
+        kind: "latv",
+        team: "NATO",
+        position: new THREE.Vector3(-82, 0, 12),
+        yaw: -Math.PI * 0.45,
+      },
+      // 2. Enemy PAX Vehicles (Northern Stronghold, Bravo Port & North Base)
+      {
+        id: "VEH_PAX_MBT_DELTA",
+        displayName: "PAX 敌军主战坦克",
+        kind: "mbt",
+        team: "PAX",
+        position: new THREE.Vector3(-16, 0, -76),
+        yaw: Math.PI,
+      },
+      {
+        id: "VEH_PAX_MBT_NORTH",
+        displayName: "PAX 重装卫队坦克",
+        kind: "mbt",
+        team: "PAX",
+        position: new THREE.Vector3(-12, 0, -158),
+        yaw: Math.PI,
+      },
+      {
+        id: "VEH_PAX_LATV_BRAVO",
+        displayName: "PAX 港口侦察装甲车",
+        kind: "latv",
+        team: "PAX",
+        position: new THREE.Vector3(78, 0, 16),
+        yaw: Math.PI * 0.55,
+      },
+      {
+        id: "VEH_PAX_LATV_PATROL",
+        displayName: "PAX 公路巡逻装甲车",
+        kind: "latv",
+        team: "PAX",
+        position: new THREE.Vector3(-14, 0, -38),
+        yaw: Math.PI * 0.92,
+      },
+    ];
+
+    for (const cfg of roster) {
+      this.vehicles.push(new CombatVehicle(cfg, this.scene, this.assets, this.physics, this.sfx));
+    }
   }
 
   public findEnterableVehicle(pos: THREE.Vector3, maxDist = 4.8): CombatVehicle | null {

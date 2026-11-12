@@ -21,6 +21,12 @@ const CALLSIGNS_NATO = [
   "SGT. HARPER",
   "CPL. BROOKS",
   "SPC. MERCER",
+  "CPL. DIAZ",
+  "SGT. FOSTER",
+  "SPC. PARK",
+  "PFC. ADAMS",
+  "CPL. WEST",
+  "LT. COLE",
 ];
 
 const CALLSIGNS_PAX = [
@@ -34,6 +40,12 @@ const CALLSIGNS_PAX = [
   "PAX-ORLOV",
   "PAX-VARGAS",
   "PAX-KIRON",
+  "PAX-MOROZOV",
+  "PAX-KADIR",
+  "PAX-BELOV",
+  "PAX-RASHID",
+  "PAX-GROZNY",
+  "PAX-NOVAK",
 ];
 
 export class AISoldier implements DamageableActor {
@@ -169,14 +181,14 @@ export class AISoldier implements DamageableActor {
 
     // Spawn near an owned Conquest Flag or Faction Base HQ
     const owned = this.map.flags.filter((f) => f.owner === this.team);
-    if (owned.length > 0 && Math.random() < 0.72) {
+    if (owned.length > 0 && Math.random() < 0.82) {
       const fl = owned[Math.floor(Math.random() * owned.length)];
       const ang = Math.random() * Math.PI * 2;
-      const dist = 5 + Math.random() * 6;
+      const dist = 6 + Math.random() * 10;
       this.position.set(fl.position.x + Math.cos(ang) * dist, 0.2, fl.position.z + Math.sin(ang) * dist);
     } else {
-      const baseZ = this.team === "NATO" ? 50 + Math.random() * 8 : -50 - Math.random() * 8;
-      this.position.set((Math.random() - 0.5) * 32, 0.2, baseZ);
+      const baseZ = this.team === "NATO" ? 148 + Math.random() * 12 : -148 - Math.random() * 12;
+      this.position.set((Math.random() - 0.5) * 44, 0.2, baseZ);
     }
 
     this.yaw = this.team === "NATO" ? 0 : Math.PI;
@@ -210,8 +222,14 @@ export class AISoldier implements DamageableActor {
 
     const ray = new THREE.Ray(from, dir);
     const hit = new THREE.Vector3();
-    for (let i = 0; i < this.physics.colliders.length; i++) {
-      const c = this.physics.colliders[i];
+    const near = this.physics.queryNearbyColliders(
+      Math.min(from.x, to.x) - 0.5,
+      Math.min(from.z, to.z) - 0.5,
+      Math.max(from.x, to.x) + 0.5,
+      Math.max(from.z, to.z) + 0.5
+    );
+    for (let i = 0; i < near.length; i++) {
+      const c = near[i];
       if (c.destroyed || c.id >= 90000) continue;
       if (ray.intersectBox(c.box, hit)) {
         if (from.distanceTo(hit) < dist - 0.5) {
@@ -225,7 +243,7 @@ export class AISoldier implements DamageableActor {
   private scanForEnemy(): void {
     const eye = this.position.clone().add(new THREE.Vector3(0, 1.5, 0));
     let best: DamageableActor | null = null;
-    let bestDist = 58.0;
+    let bestDist = 82.0;
 
     for (const actor of this.physics.actors) {
       if (!actor.isAlive() || actor.team === this.team || actor.team === "NEUTRAL") continue;
@@ -420,34 +438,49 @@ export class AIManager {
   ) {}
 
   public spawnSquads(): void {
-    // 8 NATO Allied Assault Troopers
+    // 14 NATO Allied Assault Troopers across Charlie, Echo & Alpha Frontline
+    const natoSpawns = [
+      new THREE.Vector3(-98, 0.1, -8),
+      new THREE.Vector3(-106, 0.1, -14),
+      new THREE.Vector3(-92, 0.1, -18),
+      new THREE.Vector3(20, 0.1, 104),
+      new THREE.Vector3(28, 0.1, 98),
+      new THREE.Vector3(14, 0.1, 90),
+      new THREE.Vector3(-12, 0.1, 24),
+      new THREE.Vector3(-4, 0.1, 22),
+      new THREE.Vector3(6, 0.1, 20),
+      new THREE.Vector3(14, 0.1, 24),
+      new THREE.Vector3(-48, 0.1, 16),
+      new THREE.Vector3(44, 0.1, 18),
+      new THREE.Vector3(-18, 0.1, 52),
+      new THREE.Vector3(4, 0.1, 64),
+    ];
     CALLSIGNS_NATO.forEach((name, idx) => {
-      const spawn =
-        idx < 4
-          ? new THREE.Vector3(-34 + idx * 3.2, 0.1, 4 + (idx % 2) * 3) // Charlie / Forward squad
-          : new THREE.Vector3(-10 + (idx - 4) * 5.5, 0.1, 32 + (idx % 2) * 5); // South Alpha push squad
+      const spawn = natoSpawns[idx % natoSpawns.length];
       this.soldiers.push(new AISoldier(name, "NATO", spawn, this.scene, this.assets, this.physics, this.map, this.sfx));
     });
 
-    // 10 PAX Armata OpFor Defenders & Assault Squads
+    // 16 PAX Armata OpFor Defenders & Assault Squads across Alpha, Bravo & Delta
+    const paxSpawns = [
+      new THREE.Vector3(-5, 0.1, 3),
+      new THREE.Vector3(6, 0.1, 2),
+      new THREE.Vector3(-2, 3.75, -5), // 2nd floor sniper in Alpha West Tower
+      new THREE.Vector3(14, 3.75, 7),  // 2nd floor rifleman in Alpha East Tower
+      new THREE.Vector3(10, 0.1, -8),
+      new THREE.Vector3(-10, 0.1, -12),
+      new THREE.Vector3(98, 0.1, 16),
+      new THREE.Vector3(106, 0.1, 22),
+      new THREE.Vector3(114, 0.1, 18),
+      new THREE.Vector3(118, 3.75, 12), // 2nd floor port overwatch in Bravo
+      new THREE.Vector3(-14, 0.1, -100),
+      new THREE.Vector3(-20, 0.1, -106),
+      new THREE.Vector3(-6, 0.1, -102),
+      new THREE.Vector3(52, 0.1, 8),
+      new THREE.Vector3(-52, 0.1, 8),
+      new THREE.Vector3(-16, 0.1, -48),
+    ];
     CALLSIGNS_PAX.forEach((name, idx) => {
-      let spawn: THREE.Vector3;
-      if (idx < 4) {
-        // Defending Outpost Alpha Courtyard & 1st/2nd Floor!
-        const offsets = [
-          new THREE.Vector3(-5, 0.1, 5),
-          new THREE.Vector3(6, 0.1, 4),
-          new THREE.Vector3(2, 3.75, 2), // 2nd floor sniper/rifleman inside Alpha Command Building!
-          new THREE.Vector3(-2, 0.1, -6),
-        ];
-        spawn = offsets[idx];
-      } else if (idx < 7) {
-        // Bravo Depot Squad
-        spawn = new THREE.Vector3(33 + (idx - 4) * 3.5, 0.1, 5 + (idx % 2) * 4);
-      } else {
-        // Northern PAX Reinforcement Squad
-        spawn = new THREE.Vector3(-8 + (idx - 7) * 6, 0.1, -32);
-      }
+      const spawn = paxSpawns[idx % paxSpawns.length];
       this.soldiers.push(new AISoldier(name, "PAX", spawn, this.scene, this.assets, this.physics, this.map, this.sfx));
     });
   }

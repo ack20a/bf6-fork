@@ -1024,8 +1024,10 @@ body.is-touch .slot-item kbd {
 
   .top-conquest-bar {
     top: calc(8px + var(--safe-top));
-    padding: 4px 10px;
-    gap: 8px;
+    padding: 4px 8px;
+    gap: 6px;
+    max-width: calc(100vw - 12px);
+    white-space: nowrap;
   }
 
   .team-label {

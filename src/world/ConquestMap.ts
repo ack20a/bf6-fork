@@ -1,7 +1,12 @@
 /**
- * Builds the 3-Sector Battlefield Conquest Map ("Outpost Strike") using the 18 modular
- * Blender .glb environment prefabs, manages Conquest Capture Flags [A], [B], [C],
- * Ticket Bleed, and Resupply Crates.
+ * Builds the 5-Sector Conquest Large Battlefield ("Operation Oasis Strike" — 440m x 440m)
+ * by extensively reusing and combining all 18 modular Blender .glb environment & cover prefabs:
+ *   [A] ALPHA 中央双子楼街区 (Twin 2-Story Urban Command Plaza)
+ *   [B] BRAVO 集装箱物流港 (Stacked 2-Tier Container Maze + Port Office + Warehouse)
+ *   [C] CHARLIE 绿洲荒漠小镇 (3-Building Desert Town Compound)
+ *   [D] DELTA 北部公路要塞 (Highway Overwatch Stronghold & Anti-Tank Line)
+ *   [E] ECHO 南部油库维修站 (Refinery Control Building & Fuel Depot)
+ *   + NATO South Airbase/Motor Pool (Z=+168) & PAX North Base (Z=-168) with Modular Hangars!
  */
 
 import * as THREE from "three";
@@ -9,8 +14,10 @@ import type { AssetLibrary } from "../core/AssetLoader";
 import type { WorldPhysics, Team } from "./WorldPhysics";
 import type { SoundFX } from "../audio/SoundFX";
 
+export type FlagId = "A" | "B" | "C" | "D" | "E";
+
 export interface ConquestFlag {
-  id: "A" | "B" | "C";
+  id: FlagId;
   name: string;
   position: THREE.Vector3;
   owner: Team;
@@ -24,23 +31,24 @@ export class ConquestMap {
   public flags: ConquestFlag[] = [];
   public resupplyPositions: THREE.Vector3[] = [];
   public buildingFootprints: Array<{ x: number; z: number; w: number; d: number }> = [];
-  public ticketsNATO = 300;
-  public ticketsPAX = 300;
+  public sceneryExcludeZones: Array<{ x: number; z: number; r: number }> = [];
+  public ticketsNATO = 500;
+  public ticketsPAX = 500;
   private bleedTimer = 0;
 
   private bannerMatNATO = new THREE.MeshStandardMaterial({
     color: 0x00d8ff,
-    emissive: 0x005577,
-    roughness: 0.6,
+    emissive: 0x006688,
+    roughness: 0.5,
   });
   private bannerMatPAX = new THREE.MeshStandardMaterial({
     color: 0xff4411,
-    emissive: 0x661500,
-    roughness: 0.6,
+    emissive: 0x771a00,
+    roughness: 0.5,
   });
   private bannerMatNeutral = new THREE.MeshStandardMaterial({
-    color: 0x8899a6,
-    roughness: 0.7,
+    color: 0x99aab5,
+    roughness: 0.65,
   });
 
   constructor(
@@ -51,104 +59,166 @@ export class ConquestMap {
   ) {}
 
   public buildWorld(): void {
-    // 1. Tactical Desert-Urban Ground Terrain & Asphalt Road Network
-    const texCanvas = document.createElement("canvas");
-    texCanvas.width = 256;
-    texCanvas.height = 256;
-    const ctx = texCanvas.getContext("2d")!;
-    ctx.fillStyle = "#8a7b61";
-    ctx.fillRect(0, 0, 256, 256);
-    for (let i = 0; i < 3200; i++) {
-      ctx.fillStyle = Math.random() > 0.5 ? "rgba(65,55,40,0.22)" : "rgba(175,160,130,0.18)";
-      ctx.fillRect(Math.random() * 256, Math.random() * 256, 3, 3);
-    }
-    const gndTex = new THREE.CanvasTexture(texCanvas);
-    gndTex.wrapS = gndTex.wrapT = THREE.RepeatWrapping;
-    gndTex.repeat.set(45, 45);
-    gndTex.colorSpace = THREE.SRGBColorSpace;
+    // =========================================================================
+    // 1. SECTOR ALPHA (Center 0, 0): Twin 2-Story Urban Command Plaza
+    // =========================================================================
+    this.sceneryExcludeZones.push({ x: 2, z: 0, r: 28 });
+    this.buildTwoStoryCommandBuilding(-4, -7, true);
+    this.buildTwoStoryCommandBuilding(12, 5, true);
+    this.placeFlag("A", "ALPHA 中央双子楼街区", new THREE.Vector3(-4, 0, 7.5), "NEUTRAL");
 
-    const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(220, 220),
-      new THREE.MeshStandardMaterial({ map: gndTex, roughness: 0.94, metalness: 0.0 })
-    );
-    ground.rotation.x = -Math.PI / 2;
-    ground.receiveShadow = true;
-    this.scene.add(ground);
+    this.placeEnv("COV_Sandbag_Wall_Curved", -4, 0, 11.2, 0);
+    this.placeEnv("COV_Sandbag_Wall_Curved", -7.5, 0, 7.5, -90);
+    this.placeEnv("COV_Hesco_Wall_3x", 3.5, 0, 12.5, -18);
+    this.placeEnv("COV_Hesco_Wall_3x", -11.5, 0, -2.0, 88);
+    this.placeEnv("COV_Container_20ft_Olive", 20.5, 0, -5.5, 78);
+    this.placeEnv("COV_Container_20ft_Blue", -22.5, 0, -4.5, -12);
+    this.placeEnv("COV_Jersey_Barrier_3m", -13.0, 0, 18.5, 8);
+    this.placeEnv("COV_Jersey_Barrier_3m", -18.5, 0, 18.5, -8);
+    this.placeEnv("COV_Czech_Hedgehog", -15.8, 0, 21.5, 35);
+    this.placeEnv("COV_Czech_Hedgehog", 5.5, 0, -14.2, 18);
+    this.placeResupplyCrate(-2.2, 9.2, 20);
+    this.placeResupplyCrate(8.5, 1.5, -35);
 
-    // Asphalt highway strips connecting HQ -> Alpha -> Bravo / Charlie
-    const roadMat = new THREE.MeshStandardMaterial({ color: 0x3b3f42, roughness: 0.86 });
-    const mainRoad = new THREE.Mesh(new THREE.PlaneGeometry(11, 195), roadMat);
-    mainRoad.rotation.x = -Math.PI / 2;
-    mainRoad.position.set(-12, 0.015, 0);
-    mainRoad.receiveShadow = true;
-    this.scene.add(mainRoad);
+    // =========================================================================
+    // 2. SECTOR BRAVO (East +105, +20): 2-Tier Container Port & Warehouses
+    // =========================================================================
+    this.sceneryExcludeZones.push({ x: 105, z: 20, r: 30 });
+    this.buildTwoStoryCommandBuilding(116, 10, false);
+    this.buildSingleStoryBunker(95, 32);
+    this.placeFlag("B", "BRAVO 集装箱物流港", new THREE.Vector3(103, 0, 19), "PAX");
 
-    const crossRoad = new THREE.Mesh(new THREE.PlaneGeometry(165, 9.5), roadMat);
-    crossRoad.rotation.x = -Math.PI / 2;
-    crossRoad.position.set(0, 0.02, 12);
-    crossRoad.receiveShadow = true;
-    this.scene.add(crossRoad);
+    // Multi-tier Shipping Container Canyon (Ground + Stacked 2nd Tier at Y = 2.62m!)
+    this.placeEnv("COV_Container_20ft_Blue", 94, 0, 10, 6);
+    this.placeEnv("COV_Container_20ft_Olive", 94.2, 2.62, 10, -4); // Stacked 2nd tier!
+    this.placeEnv("COV_Container_20ft_Olive", 104, 0, 6.5, 92);
+    this.placeEnv("COV_Container_20ft_Blue", 104, 2.62, 6.5, 86); // Stacked 2nd tier!
+    this.placeEnv("COV_Container_20ft_Olive", 112, 0, 25.5, -10);
+    this.placeEnv("COV_Container_20ft_Blue", 88, 0, 21.5, 84);
+    this.placeEnv("COV_Hesco_Wall_3x", 103, 0, 24.5, 0);
+    this.placeEnv("COV_Sandbag_Wall_Curved", 106.5, 0, 17.5, 120);
+    this.placeEnv("COV_Jersey_Barrier_3m", 84, 0, 14, 85);
+    this.placeResupplyCrate(104.8, 21.2, -30);
 
-    // 2. SECTOR ALPHA (Center 0, 0): 2-Story Destructible Command Building + Fortifications
-    this.buildTwoStoryCommandBuilding(0, 0);
-    this.placeFlag("A", "ALPHA 指挥前哨站", new THREE.Vector3(-8.5, 0, 7.5), "NEUTRAL");
-    this.placeEnv("COV_Sandbag_Wall_Curved", -8.5, 0, 10.2, 0);
-    this.placeEnv("COV_Sandbag_Wall_Curved", -11.0, 0, 7.5, -90);
-    this.placeResupplyCrate(-7.2, 8.8, 25);
-    this.placeResupplyCrate(-2.2, 5.2, -10);
+    // =========================================================================
+    // 3. SECTOR CHARLIE (West -105, -15): Desert Oasis Village Compound
+    // =========================================================================
+    this.sceneryExcludeZones.push({ x: -105, z: -15, r: 30 });
+    this.buildTwoStoryCommandBuilding(-114, -21, true);
+    this.buildSingleStoryBunker(-95, -23);
+    this.buildSingleStoryBunker(-111, -3);
+    this.placeFlag("C", "CHARLIE 绿洲荒漠小镇", new THREE.Vector3(-102, 0, -12), "NATO");
 
-    this.placeEnv("COV_Hesco_Wall_3x", 7.2, 0, 6.8, -25);
-    this.placeEnv("COV_Hesco_Single", 9.4, 0, 5.8, -25);
-    this.placeEnv("COV_Hesco_Wall_3x", -9.2, 0, -2.0, 90);
-    this.placeEnv("COV_Container_20ft_Olive", 11.2, 0, -2.5, 78);
-    this.placeEnv("COV_Container_20ft_Blue", -15.8, 0, -5.5, -14);
-    this.placeEnv("COV_Jersey_Barrier_3m", -3.5, 0, 11.2, 12);
-    this.placeEnv("COV_Jersey_Barrier_3m", 1.2, 0, 11.6, -15);
-    this.placeEnv("COV_Czech_Hedgehog", -12.0, 0, 15.2, 35);
-    this.placeEnv("COV_Czech_Hedgehog", 5.5, 0, 12.2, 18);
+    this.placeEnv("COV_Hesco_Wall_3x", -102, 0, -18, 12);
+    this.placeEnv("COV_Hesco_Wall_3x", -90, 0, -10, -78);
+    this.placeEnv("COV_Sandbag_Wall_Curved", -101, 0, -8.5, 0);
+    this.placeEnv("COV_Sandbag_Wall_Curved", -106, 0, -12.5, -90);
+    this.placeEnv("COV_Container_20ft_Olive", -88, 0, -2, 16);
+    this.placeEnv("COV_Jersey_Barrier_3m", -98, 0, 3.5, -15);
+    this.placeEnv("COV_Czech_Hedgehog", -93, 0, 5.5, 28);
+    this.placeEnv("BLD_Rubble_Pile", -104, 0, -25, 40);
+    this.placeResupplyCrate(-100.2, -10.2, 15);
 
-    // 3. SECTOR BRAVO (East +42, +6): Container CQB Depot & Destructible Bunker
-    this.buildSingleStoryBunker(44, -4);
-    this.placeFlag("B", "BRAVO 集装箱货场", new THREE.Vector3(36, 0, 8), "PAX");
-    this.placeEnv("COV_Container_20ft_Blue", 31.5, 0, 2.5, 12);
-    this.placeEnv("COV_Container_20ft_Olive", 32.0, 0, 14.8, -8);
-    this.placeEnv("COV_Container_20ft_Olive", 43.5, 0, 15.2, 85);
-    this.placeEnv("COV_Hesco_Wall_3x", 36.0, 0, 11.5, 0);
-    this.placeEnv("COV_Sandbag_Wall_Curved", 38.8, 0, 6.2, 110);
-    this.placeEnv("COV_Jersey_Barrier_3m", 27.5, 0, 9.2, 75);
-    this.placeResupplyCrate(37.2, 9.5, -40);
-    this.buildingFootprints.push({ x: 44, z: -4, w: 8, d: 4 });
+    // =========================================================================
+    // 4. SECTOR DELTA (North -16, -108): Northern Highway Stronghold
+    // =========================================================================
+    this.sceneryExcludeZones.push({ x: -16, z: -108, r: 26 });
+    this.buildTwoStoryCommandBuilding(-4, -110, false);
+    this.buildSingleStoryBunker(-28, -105);
+    this.placeFlag("D", "DELTA 北部公路要塞", new THREE.Vector3(-15, 0, -104), "PAX");
 
-    // 4. SECTOR CHARLIE (West -42, -8): Forward Tactical Watchpost & Anti-Armor Roadblock
-    this.buildSingleStoryBunker(-42, -12);
-    this.placeFlag("C", "CHARLIE 公路检查站", new THREE.Vector3(-36, 0, -2), "NATO");
-    this.placeEnv("COV_Hesco_Wall_3x", -36, 0, -6.5, 15);
-    this.placeEnv("COV_Hesco_Wall_3x", -31.5, 0, 2.5, -75);
-    this.placeEnv("COV_Jersey_Barrier_3m", -40.5, 0, 3.8, -22);
-    this.placeEnv("COV_Jersey_Barrier_3m", -36.5, 0, 4.5, 18);
-    this.placeEnv("COV_Czech_Hedgehog", -43.5, 0, 5.2, 40);
-    this.placeEnv("COV_Czech_Hedgehog", -32.8, 0, 6.2, 12);
-    this.placeEnv("COV_Container_20ft_Blue", -48.5, 0, -2.5, 92);
-    this.placeEnv("COV_Sandbag_Wall_Curved", -35.8, 0, 1.2, 0);
-    this.placeResupplyCrate(-34.5, -0.8, 15);
-    this.buildingFootprints.push({ x: -42, z: -12, w: 8, d: 4 });
+    this.placeEnv("COV_Hesco_Wall_3x", -15, 0, -98, 0);
+    this.placeEnv("COV_Hesco_Wall_3x", -21, 0, -112, 15);
+    this.placeEnv("COV_Jersey_Barrier_3m", -19, 0, -93, 12);
+    this.placeEnv("COV_Jersey_Barrier_3m", -13, 0, -93, -12);
+    this.placeEnv("COV_Czech_Hedgehog", -16, 0, -90, 22);
+    this.placeEnv("COV_Czech_Hedgehog", -22, 0, -91, 48);
+    this.placeEnv("COV_Container_20ft_Blue", 6, 0, -102, 85);
+    this.placeEnv("COV_Sandbag_Wall_Curved", -13, 0, -106, 180);
+    this.placeResupplyCrate(-13.5, -102.5, 0);
 
-    // 5. NATO South Motor Pool HQ (Z = +56) & PAX North Base (Z = -56) Cover
-    this.placeEnv("COV_Hesco_Wall_3x", -8, 0, 48, 0);
-    this.placeEnv("COV_Hesco_Wall_3x", 8, 0, 48, 0);
-    this.placeEnv("COV_Container_20ft_Olive", 15, 0, 55, 90);
-    this.placeResupplyCrate(-3.5, 51, 0);
+    // =========================================================================
+    // 5. SECTOR ECHO (South +22, +102): Industrial Refinery & Depot
+    // =========================================================================
+    this.sceneryExcludeZones.push({ x: 22, z: 102, r: 28 });
+    this.buildTwoStoryCommandBuilding(18, 94, false);
+    this.buildSingleStoryBunker(8, 110);
+    this.placeFlag("E", "ECHO 南部油库维修站", new THREE.Vector3(24, 0, 105), "NATO");
 
-    this.placeEnv("COV_Hesco_Wall_3x", -8, 0, -48, 180);
-    this.placeEnv("COV_Hesco_Wall_3x", 8, 0, -48, 180);
-    this.placeEnv("COV_Container_20ft_Blue", -15, 0, -54, 90);
+    this.placeEnv("COV_Hesco_Wall_3x", 24, 0, 110.5, 0);
+    this.placeEnv("COV_Sandbag_Wall_Curved", 26.5, 0, 102.5, 95);
+    this.placeEnv("COV_Container_20ft_Olive", 30, 0, 88, 12);
+    this.placeEnv("COV_Jersey_Barrier_3m", 12, 0, 85, -18);
+    this.placeEnv("COV_Czech_Hedgehog", 8, 0, 84, 30);
+    this.placeResupplyCrate(22.5, 107.2, 45);
+
+    // =========================================================================
+    // 6. MID-ROAD CONVOY AMBUSH OUTPOSTS (Bridging Sightlines Between Sectors!)
+    // =========================================================================
+    // West Road Outpost (-58, 14) between Alpha & Charlie
+    this.sceneryExcludeZones.push({ x: -58, z: 14, r: 14 });
+    this.buildSingleStoryBunker(-58, 22);
+    this.placeEnv("COV_Jersey_Barrier_3m", -56, 0, 9.5, 15);
+    this.placeEnv("COV_Container_20ft_Blue", -64, 0, 8, -12);
+    this.placeEnv("COV_Sandbag_Wall_Curved", -53, 0, 17, 45);
+
+    // East Road Outpost (+56, 14) between Alpha & Bravo
+    this.sceneryExcludeZones.push({ x: 56, z: 14, r: 14 });
+    this.buildSingleStoryBunker(56, 4);
+    this.placeEnv("COV_Hesco_Wall_3x", 54, 0, 19.5, -10);
+    this.placeEnv("COV_Container_20ft_Olive", 64, 0, 20.5, 80);
+
+    // North-Central Roadblock (-16, -55) & South-Central Checkpoint (-16, +55)
+    this.placeEnv("COV_Hesco_Wall_3x", -23, 0, -55, 75);
+    this.placeEnv("COV_Jersey_Barrier_3m", -11, 0, -53, -20);
+    this.placeEnv("COV_Hesco_Wall_3x", -9, 0, 56, -75);
+    this.placeEnv("COV_Jersey_Barrier_3m", -21, 0, 55, 22);
+
+    // =========================================================================
+    // 7. NATO SOUTH AIRBASE & MOTOR POOL HQ (Z = +168) + PAX NORTH BASE (Z = -168)
+    // =========================================================================
+    this.sceneryExcludeZones.push({ x: 0, z: 168, r: 36 });
+    this.buildOpenVehicleHangar(-12, 172);
+    this.placeEnv("COV_Hesco_Wall_3x", -18, 0, 152, 0);
+    this.placeEnv("COV_Hesco_Wall_3x", 4, 0, 152, 0);
+    this.placeEnv("COV_Container_20ft_Olive", -26, 0, 166, 90);
+    this.placeEnv("COV_Container_20ft_Blue", -26, 2.62, 166, 90);
+    this.placeResupplyCrate(-4, 158, 0);
+
+    this.sceneryExcludeZones.push({ x: 0, z: -168, r: 36 });
+    this.buildOpenVehicleHangar(4, -172);
+    this.placeEnv("COV_Hesco_Wall_3x", -14, 0, -152, 180);
+    this.placeEnv("COV_Hesco_Wall_3x", 10, 0, -152, 180);
+    this.placeEnv("COV_Container_20ft_Blue", 24, 0, -166, 90);
+    this.placeResupplyCrate(0, -158, 180);
   }
 
   /**
-   * Assemble a complete 2-story 8m x 8m destructible concrete command building at (cx, cz).
-   * Note: Blender (X, Y, Z) -> glTF Three.js (X, Z, -Y), so South (-Y_blend) is +Z_three!
+   * Open-sided Modular Military Vehicle Hangar (8m x 8m roofed motor bay).
    */
-  private buildTwoStoryCommandBuilding(cx: number, cz: number): void {
+  private buildOpenVehicleHangar(cx: number, cz: number): void {
+    this.buildingFootprints.push({ x: cx, z: cz, w: 8.4, d: 8.4 });
+    for (const bx of [-2, 2]) {
+      for (const bz of [-2, 2]) {
+        this.placeEnv("BLD_Foundation_4x4", cx + bx, 0, cz + bz, 0);
+        this.placeEnv("BLD_FloorSlab_4x4", cx + bx, 3.6, cz + bz, 0);
+      }
+    }
+    for (const px of [-4, 0, 4]) {
+      for (const pz of [-4, 4]) {
+        this.placeEnv("BLD_Pillar_3m6", cx + px, 0, cz + pz, 0);
+      }
+    }
+    this.placeEnv("BLD_Roof_Parapet_4m", cx - 2, 3.6, cz + 4, 0);
+    this.placeEnv("BLD_Roof_Parapet_4m", cx + 2, 3.6, cz + 4, 0);
+    this.placeEnv("BLD_Roof_Parapet_4m", cx - 2, 3.6, cz - 4, 180);
+    this.placeEnv("BLD_Roof_Parapet_4m", cx + 2, 3.6, cz - 4, 180);
+  }
+
+  /**
+   * Complete 2-story 8m x 8m destructible concrete command building at (cx, cz).
+   */
+  private buildTwoStoryCommandBuilding(cx: number, cz: number, withInteriorLight = false): void {
     this.buildingFootprints.push({ x: cx, z: cz, w: 8.4, d: 8.4 });
 
     for (const bx of [-2, 2]) {
@@ -165,25 +235,21 @@ export class ConquestMap {
       }
     }
 
-    // 1st Floor Walls (Y = 0)
-    // Front (+Z = +4): Left Doorway, Right Solid Wall (ready to be blasted open by RPG/Tank/C4!)
+    // 1st Floor Walls
     this.placeEnv("BLD_Wall_Door_4m", cx - 2, 0, cz + 4, 0);
-    this.placeEnv("BLD_Wall_Solid_4m", cx + 2, 0, cz + 4, 0, ["Chunk_02"]); // 1 pre-cracked peek hole!
-    // Right (+X = +4)
+    this.placeEnv("BLD_Wall_Solid_4m", cx + 2, 0, cz + 4, 0, ["Chunk_02"]);
     this.placeEnv("BLD_Wall_Window_4m", cx + 4, 0, cz + 2, 90);
     this.placeEnv("BLD_Wall_Window_4m", cx + 4, 0, cz - 2, 90);
-    // Rear (-Z = -4)
     this.placeEnv("BLD_Wall_Door_4m", cx + 2, 0, cz - 4, 180);
     this.placeEnv("BLD_Wall_Solid_4m", cx - 2, 0, cz - 4, 180);
-    // Left (-X = -4)
     this.placeEnv("BLD_Wall_Solid_4m", cx - 4, 0, cz - 2, -90);
     this.placeEnv("BLD_Wall_Window_4m", cx - 4, 0, cz + 2, -90);
 
-    // Interior Staircase in NW bay (cx - 2, cz - 2.75) rising along +X onto (cx + 2, cz - 2) 2nd floor!
+    // Interior Staircase
     this.placeEnv("BLD_Stairs_4m", cx - 2, 0, cz - 2.75, 0);
     this.placeEnv("BLD_Rubble_Pile", cx + 2.2, 0, cz + 4.7, 15);
 
-    // 2nd Floor Slabs (Y = 3.60) — leave (cx - 2, cz - 2) open for stairwell headroom!
+    // 2nd Floor Slabs
     this.placeEnv("BLD_FloorSlab_4x4", cx - 2, 3.6, cz + 2, 0);
     this.placeEnv("BLD_FloorSlab_4x4", cx + 2, 3.6, cz + 2, 0);
     this.placeEnv("BLD_FloorSlab_4x4", cx + 2, 3.6, cz - 2, 0);
@@ -198,17 +264,30 @@ export class ConquestMap {
     this.placeEnv("BLD_Wall_Solid_4m", cx - 4, 3.6, cz - 2, -90);
     this.placeEnv("BLD_Wall_Window_4m", cx - 4, 3.6, cz + 2, -90);
 
-    // Roof Slabs & Destructible Parapets (Y = 7.20)
-    for (const [bx, bz] of [[-2, -2], [2, -2], [2, 2], [-2, 2]]) {
+    // Roof Slabs & Destructible Parapets
+    for (const [bx, bz] of [
+      [-2, -2],
+      [2, -2],
+      [2, 2],
+      [-2, 2],
+    ]) {
       this.placeEnv("BLD_FloorSlab_4x4", cx + bx, 7.2, cz + bz, 0);
     }
     this.placeEnv("BLD_Roof_Parapet_4m", cx - 2, 7.2, cz + 4, 0);
     this.placeEnv("BLD_Roof_Parapet_4m", cx + 2, 7.2, cz + 4, 0);
     this.placeEnv("BLD_Roof_Parapet_4m", cx + 4, 7.2, cz + 2, 90);
     this.placeEnv("BLD_Roof_Parapet_4m", cx + 4, 7.2, cz - 2, 90);
+
+    // Warm tactical interior ceiling worklight so interior rooms aren't dark caves!
+    if (withInteriorLight) {
+      const interiorLamp = new THREE.PointLight(0xffdca8, 4.5, 14, 1.4);
+      interiorLamp.position.set(cx + 0.5, 2.95, cz + 0.5);
+      this.scene.add(interiorLamp);
+    }
   }
 
   private buildSingleStoryBunker(cx: number, cz: number): void {
+    this.buildingFootprints.push({ x: cx, z: cz, w: 8.2, d: 4.2 });
     for (const bx of [-2, 2]) {
       this.placeEnv("BLD_Foundation_4x4", cx + bx, 0, cz, 0);
       this.placeEnv("BLD_FloorSlab_4x4", cx + bx, 3.6, cz, 0);
@@ -256,7 +335,7 @@ export class ConquestMap {
     this.resupplyPositions.push(new THREE.Vector3(x, 0, z));
   }
 
-  private placeFlag(id: "A" | "B" | "C", name: string, pos: THREE.Vector3, initialOwner: Team): void {
+  private placeFlag(id: FlagId, name: string, pos: THREE.Vector3, initialOwner: Team): void {
     const pole = this.placeEnv("OBJ_Conquest_Flagpole", pos.x, pos.y, pos.z, 0);
     let banner: THREE.Object3D | undefined;
     pole.traverse((o) => {
@@ -297,7 +376,7 @@ export class ConquestMap {
     unitPositions: Array<{ pos: THREE.Vector3; team: Team; isPlayer?: boolean }>,
     onPlayerCaptured?: (flag: ConquestFlag) => void
   ): ConquestFlag | null {
-    const CAPTURE_RADIUS = 10.5;
+    const CAPTURE_RADIUS = 13.5;
     let playerActiveFlag: ConquestFlag | null = null;
 
     for (const f of this.flags) {
@@ -308,7 +387,7 @@ export class ConquestMap {
       for (const u of unitPositions) {
         const dx = u.pos.x - f.position.x;
         const dz = u.pos.z - f.position.z;
-        if (dx * dx + dz * dz <= CAPTURE_RADIUS * CAPTURE_RADIUS && Math.abs(u.pos.y - f.position.y) < 5.0) {
+        if (dx * dx + dz * dz <= CAPTURE_RADIUS * CAPTURE_RADIUS && Math.abs(u.pos.y - f.position.y) < 6.0) {
           if (u.team === "NATO") natoCount++;
           else if (u.team === "PAX") paxCount++;
           if (u.isPlayer) playerInside = true;
@@ -319,7 +398,7 @@ export class ConquestMap {
 
       const diff = natoCount - paxCount;
       if (diff !== 0) {
-        const rate = Math.min(3, Math.abs(diff)) * 0.16 * Math.sign(diff);
+        const rate = Math.min(3, Math.abs(diff)) * 0.17 * Math.sign(diff);
         const prevOwner = f.owner;
         f.progress = THREE.MathUtils.clamp(f.progress + rate * dt, -1.0, 1.0);
         f.capturingTeam = diff > 0 ? "NATO" : "PAX";
@@ -341,9 +420,9 @@ export class ConquestMap {
       }
     }
 
-    // Conquest Ticket Bleed every 2.5 seconds when one faction holds majority flags
+    // Conquest Ticket Bleed every 2.2 seconds when one faction holds majority of the 5 sectors
     this.bleedTimer += dt;
-    if (this.bleedTimer >= 2.5) {
+    if (this.bleedTimer >= 2.2) {
       this.bleedTimer = 0;
       const natoFlags = this.flags.filter((fl) => fl.owner === "NATO").length;
       const paxFlags = this.flags.filter((fl) => fl.owner === "PAX").length;

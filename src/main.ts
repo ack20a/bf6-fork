@@ -1,7 +1,8 @@
 /**
- * Battlefield: Outpost Alpha — Playable Combined-Arms Conquest Prototype Entry Point.
- * Loads all 29 custom Blender .glb PBR assets, initializes WorldPhysics, ConquestMap,
- * Vehicles, AI Squads, PlayerController, and HUD.
+ * Battlefield: Operation Oasis Strike — Playable Combined-Arms Conquest Large Prototype.
+ * Features Physical Sky + PMREM HDR IBL Lighting, 1600m Desert-Mountain Vista,
+ * 440m x 440m 5-Sector Conquest Map (12+ Destructible Buildings, Stacked Container Port,
+ * Instanced Date Palms, Scrub Bushes & Sandstone Boulders), 10 Land/Air Vehicles & 30 Skinned AI Soldiers.
  */
 
 import * as THREE from "three";
@@ -11,6 +12,7 @@ import { AIManager } from "./entities/AISoldiers";
 import { VehicleManager } from "./entities/Vehicles";
 import { PlayerController } from "./player/PlayerController";
 import { BattlefieldHUD } from "./ui/HUD";
+import { AtmosphereAndScenery } from "./world/AtmosphereAndScenery";
 import { ConquestMap } from "./world/ConquestMap";
 import { WorldPhysics } from "./world/WorldPhysics";
 
@@ -21,8 +23,9 @@ async function bootstrap(): Promise<void> {
   const loadingText = document.getElementById("loading-text")!;
   const btnHq = document.getElementById("btn-deploy-hq") as HTMLButtonElement;
   const btnOutpost = document.getElementById("btn-deploy-outpost") as HTMLButtonElement;
+  const btnOasis = document.getElementById("btn-deploy-oasis") as HTMLButtonElement;
 
-  // 1. Renderer, Atmospheric Desert-Urban Sky & Directional Sun Shadow Rig
+  // 1. Renderer, Physical Sky, HDR PMREM Environment IBL & Golden-Hour Directional Sun
   const isCoarseMobile = window.matchMedia?.("(pointer: coarse)").matches || window.innerWidth <= 860;
   const renderer = new THREE.WebGLRenderer({ antialias: !isCoarseMobile, powerPreference: "high-performance" });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, isCoarseMobile ? 1.5 : 2));
@@ -30,7 +33,7 @@ async function bootstrap(): Promise<void> {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.12;
+  renderer.toneMappingExposure = 1.22;
   container.appendChild(renderer.domElement);
 
   const toggleFullscreen = () => {
@@ -44,36 +47,33 @@ async function bootstrap(): Promise<void> {
   document.getElementById("btn-fullscreen-hud")?.addEventListener("click", toggleFullscreen);
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x9dc0d8);
-  scene.fog = new THREE.FogExp2(0xb8c8d0, 0.0045);
 
-  const camera = new THREE.PerspectiveCamera(74, window.innerWidth / window.innerHeight, 0.045, 320);
+  const camera = new THREE.PerspectiveCamera(74, window.innerWidth / window.innerHeight, 0.045, 1450);
   scene.add(camera);
 
-  // Cinematic Hemisphere + Tactical Golden-Hour Directional Light
-  const hemiLight = new THREE.HemisphereLight(0xd8eeff, 0x7c6a52, 0.95);
+  // Rich Sky-to-Warm-Sand Bounce Hemisphere Light + Crisp Golden-Hour Sun
+  const hemiLight = new THREE.HemisphereLight(0xdff0ff, 0xc4a478, 1.15);
   scene.add(hemiLight);
 
-  const sunLight = new THREE.DirectionalLight(0xfff1d8, 2.35);
-  sunLight.position.set(45, 68, 38);
+  const sunLight = new THREE.DirectionalLight(0xfff1da, 3.15);
   sunLight.castShadow = true;
   const shadowRes = isCoarseMobile ? 1024 : 2048;
   sunLight.shadow.mapSize.set(shadowRes, shadowRes);
-  sunLight.shadow.camera.near = 5;
-  sunLight.shadow.camera.far = 185;
-  const shadowExtent = 58;
+  sunLight.shadow.camera.near = 8;
+  sunLight.shadow.camera.far = 230;
+  const shadowExtent = 68;
   sunLight.shadow.camera.left = -shadowExtent;
   sunLight.shadow.camera.right = shadowExtent;
   sunLight.shadow.camera.top = shadowExtent;
   sunLight.shadow.camera.bottom = -shadowExtent;
-  sunLight.shadow.bias = -0.0005;
+  sunLight.shadow.bias = -0.00045;
   scene.add(sunLight);
   scene.add(sunLight.target);
 
   // Aerial overview camera pose while on the Tactical Deployment Screen
-  let overviewAngle = 0.55;
-  camera.position.set(28, 22, 32);
-  camera.lookAt(0, 3, 0);
+  let overviewAngle = 0.65;
+  camera.position.set(48, 26, 48);
+  camera.lookAt(2, 4, 0);
 
   window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
@@ -97,10 +97,14 @@ async function bootstrap(): Promise<void> {
     return;
   }
 
-  // 3. Construct Destructible Battlefield, Vehicles, AI Squads, Player & HUD
+  // 3. Construct Physical Sky/IBL, 5-Sector Conquest Map, Oasis Vegetation, Vehicles, AI & Player
   const physics = new WorldPhysics(scene, assets, sfx);
+  const scenery = new AtmosphereAndScenery(scene, renderer, physics);
+  scenery.setupSkyAndIBL(sunLight);
+
   const map = new ConquestMap(scene, assets, physics, sfx);
   map.buildWorld();
+  scenery.buildRichBattlefieldScenery(map.sceneryExcludeZones);
 
   const vehicles = new VehicleManager(scene, assets, physics, sfx);
   vehicles.spawnInitialVehicles();
@@ -111,7 +115,6 @@ async function bootstrap(): Promise<void> {
   const player = new PlayerController(camera, renderer.domElement, assets, physics, vehicles, map, sfx);
   const hud = new BattlefieldHUD();
 
-  // Connect hitmarkers, killfeed & score popups
   physics.onPlayerHitConfirm = (isKill, victimName, weaponName, isHeadshot) => {
     hud.showHitmarker(isKill);
     if (isKill) {
@@ -130,51 +133,58 @@ async function bootstrap(): Promise<void> {
     loadingText.textContent = "阵亡重整 (K.I.A.) — 请选择重生部署点重返战场！";
   };
 
-  // Enable Deployment Buttons!
+  // Enable All 3 Deployment Buttons!
   loadingBar.style.width = "100%";
-  loadingText.textContent = "全部 29 个 Blender 战术 PBR 资产已就绪 — 选择部署点进入战斗！";
+  loadingText.textContent = "5大防区 · 棕榈绿洲大规模战场与 29 项 PBR 资产已就绪 — 选择部署点！";
   btnHq.disabled = false;
   btnOutpost.disabled = false;
+  btnOasis.disabled = false;
 
   btnHq.addEventListener("click", () => {
     deployScreen.classList.add("hidden");
     hud.setVisible(true);
-    // Spawn right in front of NATO M1A2 AbramsX Tank & AH-6J Little Bird Helicopter!
-    player.spawnAt(new THREE.Vector3(-4.5, 0.15, 49.5), 0.12);
-    hud.pushScoreEvent("部署至联军重装车库 (按 [E] 可直接驾驶坦克或小鸟直升机)", 50);
+    // Spawn right between the NATO Hangar M1A2 Tank, LATV4 & [H] Helipad Little Bird!
+    player.spawnAt(new THREE.Vector3(6.5, 0.15, 165.0), 0.08);
+    hud.pushScoreEvent("部署至联军空地主基地（左侧机库 M1A2 坦克 · 右侧停机坪小鸟直升机）", 50);
   });
 
   btnOutpost.addEventListener("click", () => {
     deployScreen.classList.add("hidden");
     hud.setVisible(true);
-    // Spawn right at Sector Alpha Southern Approach near LATV4 & RPG breach line!
-    player.spawnAt(new THREE.Vector3(-3.0, 0.15, 19.5), -0.08);
-    hud.pushScoreEvent("前线空降：Alpha 指挥前哨站 (按 [2] 切换 RPG 轰开二层小楼墙体！)", 50);
+    player.spawnAt(new THREE.Vector3(-5.0, 0.15, 25.5), -0.08);
+    hud.pushScoreEvent("空降：Alpha 中央双子楼街区（小心二楼窗口敌军与街口装甲车！）", 50);
+  });
+
+  btnOasis.addEventListener("click", () => {
+    deployScreen.classList.add("hidden");
+    hud.setVisible(true);
+    player.spawnAt(new THREE.Vector3(-88.0, 0.15, -4.0), 0.55);
+    hud.pushScoreEvent("侧翼部署：Charlie 绿洲荒漠小镇（身旁已备好 LATV4 机动突击车）", 50);
   });
 
   // 4. Main Simulation Loop
   let prevTime = performance.now();
+  const sunDir: THREE.Vector3 = (sunLight.userData.sunDir as THREE.Vector3) ?? new THREE.Vector3(0.45, 0.65, 0.55);
 
   function animate(now: number): void {
     requestAnimationFrame(animate);
     const dt = Math.min(0.05, Math.max(0.001, (now - prevTime) * 0.001));
     prevTime = now;
 
-    // Update Vehicles, AI Soldiers, Ballistics/Destruction & Conquest Capture
+    const focusPos = player.deployed ? player.getPosition() : camera.position;
     const vehInput = player.buildVehicleInput();
-    vehicles.update(dt, player.activeVehicle, vehInput, player.getPosition());
-    ai.update(dt, player.getPosition());
+    vehicles.update(dt, player.activeVehicle, vehInput, focusPos);
+    ai.update(dt, focusPos);
     physics.update(dt);
+    scenery.update(dt, focusPos);
 
     if (player.deployed) {
       player.update(dt);
 
-      // Follow player with directional shadow frustum for crisp close-up shadows everywhere
       const pPos = player.getPosition();
-      sunLight.position.set(pPos.x + 42, 68, pPos.z + 36);
+      sunLight.position.copy(pPos).addScaledVector(sunDir, 95);
       sunLight.target.position.set(pPos.x, 0, pPos.z);
 
-      // Gather live Conquest capture units
       const units: Array<{ pos: THREE.Vector3; team: "NATO" | "PAX" | "NEUTRAL"; isPlayer?: boolean }> = [
         { pos: pPos, team: "NATO", isPlayer: true },
       ];
@@ -188,10 +198,11 @@ async function bootstrap(): Promise<void> {
       });
       hud.update(dt, player, map, ai, vehicles, activeFlag);
     } else {
-      // Orbiting aerial recon camera over live AI firefight at Outpost Alpha!
-      overviewAngle += dt * 0.14;
-      camera.position.set(Math.cos(overviewAngle) * 34, 21, Math.sin(overviewAngle) * 34);
-      camera.lookAt(0, 3.2, 0);
+      overviewAngle += dt * 0.11;
+      camera.position.set(Math.cos(overviewAngle) * 56, 26, Math.sin(overviewAngle) * 56);
+      camera.lookAt(2, 3.5, 0);
+      sunLight.position.set(sunDir.x * 95, sunDir.y * 95, sunDir.z * 95);
+      sunLight.target.position.set(0, 0, 0);
 
       const units = ai.soldiers.filter((s) => s.isAlive()).map((s) => ({ pos: s.position, team: s.team }));
       map.update(dt, units);

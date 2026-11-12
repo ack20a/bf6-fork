@@ -68,10 +68,16 @@ export interface PlantedC4 {
 
 export class WorldPhysics {
   public colliders: ColliderBox[] = [];
+  public dynamicColliders: ColliderBox[] = [];
   public actors: DamageableActor[] = [];
   public plantedC4s: PlantedC4[] = [];
 
   private nextColliderId = 1;
+  private readonly cellSize = 16;
+  private spatialGrid = new Map<number, ColliderBox[]>();
+  private queryStamp = 1;
+  private seenStamp = new Map<number, number>();
+  private queryBuf: ColliderBox[] = [];
   private projectiles: FlyingProjectile[] = [];
   private debris: DebrisPiece[] = [];
   private particles: SmokeParticle[] = [];
@@ -142,7 +148,7 @@ export class WorldPhysics {
       );
       const hp = Number(ud.hp || parentUd.hp || (isDestructible ? 130 : 99999));
 
-      this.colliders.push({
+      const col: ColliderBox = {
         id: this.nextColliderId++,
         box,
         mesh: obj,
@@ -150,8 +156,65 @@ export class WorldPhysics {
         hp,
         maxHp: hp,
         destroyed: false,
-      });
+      };
+      this.addStaticCollider(col);
     });
+  }
+
+  private addStaticCollider(col: ColliderBox): void {
+    this.colliders.push(col);
+    const cs = this.cellSize;
+    const x0 = Math.floor(col.box.min.x / cs);
+    const x1 = Math.floor(col.box.max.x / cs);
+    const z0 = Math.floor(col.box.min.z / cs);
+    const z1 = Math.floor(col.box.max.z / cs);
+    for (let cx = x0; cx <= x1; cx++) {
+      for (let cz = z0; cz <= z1; cz++) {
+        const key = ((cx + 512) << 10) | ((cz + 512) & 1023);
+        let bucket = this.spatialGrid.get(key);
+        if (!bucket) {
+          bucket = [];
+          this.spatialGrid.set(key, bucket);
+        }
+        bucket.push(col);
+      }
+    }
+  }
+
+  public addDynamicCollider(col: ColliderBox): void {
+    this.colliders.push(col);
+    this.dynamicColliders.push(col);
+  }
+
+  public queryNearbyColliders(minX: number, minZ: number, maxX: number, maxZ: number): ColliderBox[] {
+    const out = this.queryBuf;
+    out.length = 0;
+    const stamp = ++this.queryStamp;
+    const cs = this.cellSize;
+    const x0 = Math.floor(minX / cs);
+    const x1 = Math.floor(maxX / cs);
+    const z0 = Math.floor(minZ / cs);
+    const z1 = Math.floor(maxZ / cs);
+
+    for (let cx = x0; cx <= x1; cx++) {
+      for (let cz = z0; cz <= z1; cz++) {
+        const key = ((cx + 512) << 10) | ((cz + 512) & 1023);
+        const bucket = this.spatialGrid.get(key);
+        if (!bucket) continue;
+        for (let i = 0; i < bucket.length; i++) {
+          const c = bucket[i];
+          if (!c.destroyed && this.seenStamp.get(c.id) !== stamp) {
+            this.seenStamp.set(c.id, stamp);
+            out.push(c);
+          }
+        }
+      }
+    }
+    for (let i = 0; i < this.dynamicColliders.length; i++) {
+      const dc = this.dynamicColliders[i];
+      if (!dc.destroyed) out.push(dc);
+    }
+    return out;
   }
 
   private registerStairSteps(stairsRoot: THREE.Object3D): void {
@@ -179,7 +242,7 @@ export class WorldPhysics {
         c.applyMatrix4(stairsRoot.matrixWorld);
         stepBox.expandByPoint(c);
       }
-      this.colliders.push({
+      this.addStaticCollider({
         id: this.nextColliderId++,
         box: stepBox,
         destructible: false,
@@ -191,7 +254,7 @@ export class WorldPhysics {
   }
 
   public addManualBox(box: THREE.Box3): void {
-    this.colliders.push({
+    this.addStaticCollider({
       id: this.nextColliderId++,
       box,
       destructible: false,
@@ -219,16 +282,17 @@ export class WorldPhysics {
     pos.z += vel.z * dt;
     this.pushOutHorizontal(pos, radius, height, stepHeight);
 
-    // Keep inside 190m x 190m battlefield boundary
-    pos.x = THREE.MathUtils.clamp(pos.x, -92, 92);
-    pos.z = THREE.MathUtils.clamp(pos.z, -92, 92);
+    // Keep inside expanded 430m x 430m Conquest Large battlefield boundary
+    pos.x = THREE.MathUtils.clamp(pos.x, -215, 215);
+    pos.z = THREE.MathUtils.clamp(pos.z, -215, 215);
 
     // 2. Vertical gravity, floor landing & step-up support
     pos.y += vel.y * dt;
     let supportY = 0.0; // Base ground plane at Y = 0
+    const near = this.queryNearbyColliders(pos.x - radius, pos.z - radius, pos.x + radius, pos.z + radius);
 
-    for (let i = 0; i < this.colliders.length; i++) {
-      const c = this.colliders[i];
+    for (let i = 0; i < near.length; i++) {
+      const c = near[i];
       if (c.destroyed) continue;
       const b = c.box;
       if (pos.x + radius <= b.min.x || pos.x - radius >= b.max.x) continue;
@@ -236,7 +300,6 @@ export class WorldPhysics {
 
       // Floor / Stair top support if player feet were above or within stepHeight of b.max.y
       if (b.max.y <= pos.y + stepHeight && b.max.y > supportY) {
-        // Ensure headroom above b.max.y isn't blocked
         supportY = b.max.y;
       }
       // Ceiling hit check
@@ -248,7 +311,6 @@ export class WorldPhysics {
 
     let grounded = false;
     if (pos.y <= supportY + 0.02 && vel.y <= 0.05) {
-      // Smoothly step up onto stairs/curbs
       if (supportY > pos.y) {
         pos.y = THREE.MathUtils.lerp(pos.y, supportY, Math.min(1, dt * 22));
         if (Math.abs(supportY - pos.y) < 0.02) pos.y = supportY;
@@ -265,8 +327,9 @@ export class WorldPhysics {
   private pushOutHorizontal(pos: THREE.Vector3, radius: number, height: number, stepHeight: number): void {
     const yMin = pos.y + stepHeight;
     const yMax = pos.y + height;
-    for (let i = 0; i < this.colliders.length; i++) {
-      const c = this.colliders[i];
+    const near = this.queryNearbyColliders(pos.x - radius, pos.z - radius, pos.x + radius, pos.z + radius);
+    for (let i = 0; i < near.length; i++) {
+      const c = near[i];
       if (c.destroyed) continue;
       const b = c.box;
       if (yMax <= b.min.y || yMin >= b.max.y) continue;
@@ -630,9 +693,15 @@ export class WorldPhysics {
           }
         }
 
-        // World Box3 colliders
-        for (let cIdx = 0; cIdx < this.colliders.length; cIdx++) {
-          const col = this.colliders[cIdx];
+        // World Box3 colliders (Spatial Grid broadphase along projectile segment)
+        const nearCols = this.queryNearbyColliders(
+          Math.min(p.pos.x, nextPos.x) - 0.5,
+          Math.min(p.pos.z, nextPos.z) - 0.5,
+          Math.max(p.pos.x, nextPos.x) + 0.5,
+          Math.max(p.pos.z, nextPos.z) + 0.5
+        );
+        for (let cIdx = 0; cIdx < nearCols.length; cIdx++) {
+          const col = nearCols[cIdx];
           if (col.destroyed) continue;
           if (ray.intersectBox(col.box, hitPt)) {
             const d = p.pos.distanceTo(hitPt);

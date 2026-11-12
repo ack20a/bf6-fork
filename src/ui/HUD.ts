@@ -20,6 +20,8 @@ export class BattlefieldHUD {
     A: document.getElementById("flag-ui-A")!,
     B: document.getElementById("flag-ui-B")!,
     C: document.getElementById("flag-ui-C")!,
+    D: document.getElementById("flag-ui-D")!,
+    E: document.getElementById("flag-ui-E")!,
   };
 
   private captureBannerEl = document.getElementById("capture-banner")!;
@@ -190,7 +192,12 @@ export class BattlefieldHUD {
     this.compassEl.textContent = `HDG ${String(Math.round(deg)).padStart(3, "0")}° ${dirLbl}`;
 
     const pPos = player.getPosition();
-    this.sectorEl.textContent = pPos.x > 20 ? "SECTOR BRAVO" : pPos.x < -20 ? "SECTOR CHARLIE" : "SECTOR ALPHA";
+    if (pPos.z > 135) this.sectorEl.textContent = "NATO AIRBASE";
+    else if (pPos.z < -72) this.sectorEl.textContent = "SECTOR DELTA";
+    else if (pPos.z > 70) this.sectorEl.textContent = "SECTOR ECHO";
+    else if (pPos.x > 60) this.sectorEl.textContent = "SECTOR BRAVO";
+    else if (pPos.x < -60) this.sectorEl.textContent = "SECTOR CHARLIE";
+    else this.sectorEl.textContent = "SECTOR ALPHA";
 
     this.drawMinimap(pPos.x, pPos.z, lookYaw, map, ai, vehicles);
   }
@@ -208,9 +215,14 @@ export class BattlefieldHUD {
     const H = this.minimapCanvas.height;
     const cx = W * 0.5;
     const cz = H * 0.5;
-    const scale = 1.45; // pixels per meter (~130m radar window)
+    const scale = 0.72; // pixels per meter (~265m Conquest Large radar window)
 
     ctx.clearRect(0, 0, W, H);
+
+    const toScreen = (wx: number, wz: number): [number, number] => [
+      cx + (wx - px) * scale,
+      cz + (wz - pz) * scale,
+    ];
 
     // Subtle tactical grid
     ctx.strokeStyle = "rgba(0, 240, 255, 0.08)";
@@ -226,10 +238,12 @@ export class BattlefieldHUD {
       ctx.stroke();
     }
 
-    const toScreen = (wx: number, wz: number): [number, number] => [
-      cx + (wx - px) * scale,
-      cz + (wz - pz) * scale,
-    ];
+    // Highway cross-network on radar
+    ctx.fillStyle = "rgba(180, 200, 215, 0.14)";
+    const [rx] = toScreen(-22, 0);
+    ctx.fillRect(rx, 0, 12 * scale, H);
+    const [, rz] = toScreen(0, 8);
+    ctx.fillRect(0, rz, W, 12 * scale);
 
     // Building footprints
     ctx.fillStyle = "rgba(160, 185, 200, 0.28)";
