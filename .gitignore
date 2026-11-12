@@ -1,0 +1,15 @@
+# Dependencies & Build Output
+node_modules/
+dist/
+.vite/
+
+# Blender Backup Files & Python Cache
+*.blend1
+*.blend2
+__pycache__/
+*.py[cod]
+
+# OS & Editor
+.DS_Store
+Thumbs.db
+*.log
