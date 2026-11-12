@@ -28,15 +28,17 @@ async function bootstrap(): Promise<void> {
   // 1. Renderer, Physical Sky, HDR PMREM Environment IBL & Golden-Hour Directional Sun
   const isCoarseMobile = window.matchMedia?.("(pointer: coarse)").matches || window.innerWidth <= 860;
   const renderer = new THREE.WebGLRenderer({ antialias: !isCoarseMobile, powerPreference: "high-performance" });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, isCoarseMobile ? 1.25 : 1.5));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, isCoarseMobile ? 1.25 : 1.75));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFShadowMap;
+  renderer.shadowMap.type = isCoarseMobile ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
   renderer.shadowMap.autoUpdate = false;
   renderer.shadowMap.needsUpdate = true;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.22;
   container.appendChild(renderer.domElement);
+
+  const maxAnisotropy = Math.min(renderer.capabilities.getMaxAnisotropy(), isCoarseMobile ? 4 : 8);
 
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -50,7 +52,7 @@ async function bootstrap(): Promise<void> {
 
   const scene = new THREE.Scene();
 
-  const camera = new THREE.PerspectiveCamera(74, window.innerWidth / window.innerHeight, 0.045, 1450);
+  const camera = new THREE.PerspectiveCamera(74, window.innerWidth / window.innerHeight, 0.05, 2500);
   scene.add(camera);
 
   // Rich Sky-to-Warm-Sand Bounce Hemisphere Light + Crisp Golden-Hour Sun
@@ -62,13 +64,14 @@ async function bootstrap(): Promise<void> {
   const shadowRes = isCoarseMobile ? 1024 : 2048;
   sunLight.shadow.mapSize.set(shadowRes, shadowRes);
   sunLight.shadow.camera.near = 8;
-  sunLight.shadow.camera.far = 230;
-  const shadowExtent = 52;
+  sunLight.shadow.camera.far = 235;
+  const shadowExtent = 56;
   sunLight.shadow.camera.left = -shadowExtent;
   sunLight.shadow.camera.right = shadowExtent;
   sunLight.shadow.camera.top = shadowExtent;
   sunLight.shadow.camera.bottom = -shadowExtent;
-  sunLight.shadow.bias = -0.0005;
+  sunLight.shadow.bias = -0.00035;
+  sunLight.shadow.normalBias = 0.022;
   scene.add(sunLight);
   scene.add(sunLight.target);
 
@@ -91,8 +94,8 @@ async function bootstrap(): Promise<void> {
     await assets.loadAll((loaded, total, key) => {
       const pct = Math.round((loaded / total) * 100);
       loadingBar.style.width = `${pct}%`;
-      loadingText.textContent = `正在加载战术资产 (${loaded}/${total} · ${pct}%) — ${key}.glb`;
-    });
+      loadingText.textContent = `正在加载高精度战术资产 (${loaded}/${total} · ${pct}%) — ${key}.glb`;
+    }, maxAnisotropy);
   } catch (err) {
     loadingText.textContent = `资产加载异常: ${String(err)}`;
     console.error(err);

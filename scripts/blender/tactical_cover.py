@@ -142,7 +142,7 @@ def build_hesco_single(collection: bpy.types.Collection, mats: dict) -> bpy.type
         collection,
         parent=root,
         uv_scale=0.85,
-        shade_smooth=False,
+        shade_smooth=True,
         extras={"destructible": True, "hp": 250},
     )
     return root

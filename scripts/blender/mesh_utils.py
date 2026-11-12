@@ -134,6 +134,22 @@ def create_empty_root(
     return obj
 
 
+def apply_smooth_by_angle(bm: bmesh.types.BMesh, angle_deg: float = 40.0) -> None:
+    """
+    Smooth curved surfaces (cylinders, domes, spheres, organic fabric) while marking
+    edges >= angle_deg as sharp so mechanical/architectural creases stay razor-crisp in glTF!
+    """
+    bm.normal_update()
+    limit_rad = math.radians(angle_deg)
+    for f in bm.faces:
+        f.smooth = True
+    for e in bm.edges:
+        if len(e.link_faces) == 2:
+            e.smooth = e.calc_face_angle(0.0) < limit_rad
+        else:
+            e.smooth = False
+
+
 def finalize_bmesh_object(
     name: str,
     bm: bmesh.types.BMesh,
@@ -143,12 +159,19 @@ def finalize_bmesh_object(
     location: tuple[float, float, float] = (0.0, 0.0, 0.0),
     uv_scale: float = 0.5,
     bevel_width: float = 0.0,
-    shade_smooth: bool = False,
+    shade_smooth: bool = True,
+    smooth_angle_deg: float = 40.0,
     extras: dict | None = None,
 ) -> bpy.types.Object:
-    """Convert BMesh into a linked Blender Object with UVs, materials, optional Bevel modifier, and metadata."""
+    """Convert BMesh into a linked Blender Object with UVs, materials, angle-weighted normals, Bevel, and metadata."""
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
     apply_box_uv(bm, uv_scale=uv_scale)
+
+    if shade_smooth:
+        apply_smooth_by_angle(bm, angle_deg=smooth_angle_deg)
+    else:
+        for f in bm.faces:
+            f.smooth = False
 
     mesh = bpy.data.meshes.new(name)
     bm.to_mesh(mesh)
@@ -156,10 +179,6 @@ def finalize_bmesh_object(
 
     for mat in materials:
         mesh.materials.append(mat)
-
-    if shade_smooth:
-        for poly in mesh.polygons:
-            poly.use_smooth = True
 
     obj = bpy.data.objects.new(name, mesh)
     obj.location = location
@@ -171,7 +190,7 @@ def finalize_bmesh_object(
     if bevel_width > 0.0:
         bev = obj.modifiers.new(name="TacticalBevel", type="BEVEL")
         bev.width = bevel_width
-        bev.segments = 1
+        bev.segments = 2
         bev.limit_method = "ANGLE"
         bev.angle_limit = math.radians(35.0)
 

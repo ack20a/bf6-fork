@@ -122,7 +122,7 @@ class SkinnedMeshBuilder:
         z_clip_min: float | None = None,
     ) -> None:
         tmp = bmesh.new()
-        bmesh.ops.create_uvsphere(tmp, u_segments=14, v_segments=10, radius=1.0)
+        bmesh.ops.create_uvsphere(tmp, u_segments=20, v_segments=14, radius=1.0)
         cx, cy, cz = center
         rx, ry, rz = radii
         for v in tmp.verts:
@@ -156,7 +156,19 @@ class SkinnedMeshBuilder:
         collection: bpy.types.Collection,
         uv_scale: float = 1.6,
     ) -> bpy.types.Object:
+        bmesh.ops.recalc_face_normals(self.bm, faces=self.bm.faces)
         apply_box_uv(self.bm, uv_scale=uv_scale)
+        # Angle-weighted smooth shading without splitting vertices (preserves 1:1 vert_weights indexing!)
+        self.bm.normal_update()
+        limit_rad = math.radians(44.0)
+        for f in self.bm.faces:
+            f.smooth = True
+        for e in self.bm.edges:
+            if len(e.link_faces) == 2:
+                e.smooth = e.calc_face_angle(0.0) < limit_rad
+            else:
+                e.smooth = False
+
         mesh = bpy.data.meshes.new(name)
         self.bm.to_mesh(mesh)
         self.bm.free()
@@ -360,23 +372,30 @@ def _build_soldier_mesh(
     sb.add_box((0.0, 0.118, 1.665), (0.138, 0.020, 0.038), 5, {"Head": 1.0}, bevel=0.003)
 
     if not is_opfor:
-        # NATO Ops-Core FAST High-Cut Helmet + ComTac Headset + Stowed Dual-Tube NVGs!
+        # NATO Ops-Core FAST High-Cut Helmet + ComTac Headset + Boom Mic + Stowed Dual-Tube NVGs!
         sb.add_dome_sphere((0.0, -0.005, 1.695), (0.114, 0.126, 0.105), 1, {"Head": 1.0}, z_clip_min=1.655)
-        # Side ARC rails & ComTac ear-pro cups
         for sx in (-1.0, 1.0):
             sb.add_box((sx * 0.108, 0.01, 1.685), (0.016, 0.11, 0.022), 4, {"Head": 1.0})
             sb.add_box((sx * 0.104, -0.01, 1.645), (0.028, 0.068, 0.078), 2, {"Head": 1.0}, bevel=0.006)
-        # Front NVG Wilcox Mount + Folded Dual PVS-31 Night Vision Tubes
+        sb.add_limb_tube((-0.102, 0.02, 1.62), (-0.032, 0.115, 1.595), 0.004, 0.004, 2, {"Head": 1.0}, segments=8, rings=1)
+        # Front NVG Wilcox Mount + Folded Dual PVS-31 Night Vision Tubes + Objective Focus Rings
         sb.add_box((0.0, 0.122, 1.725), (0.048, 0.024, 0.046), 4, {"Head": 1.0})
         for sx in (-0.034, 0.034):
-            sb.add_limb_tube((sx, 0.13, 1.74), (sx, 0.18, 1.79), 0.020, 0.022, 2, {"Head": 1.0}, segments=10, rings=1)
-            sb.add_limb_tube((sx, 0.18, 1.79), (sx, 0.186, 1.795), 0.019, 0.019, 5, {"Head": 1.0}, segments=10, rings=1)
-        # Rear NVG battery pack
+            sb.add_limb_tube((sx, 0.13, 1.74), (sx, 0.18, 1.79), 0.020, 0.022, 2, {"Head": 1.0}, segments=14, rings=1)
+            sb.add_limb_tube((sx, 0.172, 1.782), (sx, 0.184, 1.793), 0.0235, 0.0235, 4, {"Head": 1.0}, segments=14, rings=1)
+            sb.add_limb_tube((sx, 0.18, 1.79), (sx, 0.187, 1.796), 0.019, 0.019, 5, {"Head": 1.0}, segments=14, rings=1)
         sb.add_box((0.0, -0.128, 1.695), (0.072, 0.028, 0.052), 2, {"Head": 1.0}, bevel=0.004)
+        # Chest CAT Tourniquet & Chemlight sticks
+        sb.add_box((0.125, 0.145, 1.355), (0.032, 0.030, 0.095), 2, {"Chest": 1.0}, bevel=0.004)
     else:
-        # Pax Armata Heavy Assault Helmet (Full ear-guard shell + Ballistic brow shield)
+        # Pax Armata Heavy Assault Helmet (Full ear-guard shell + Ballistic brow shield + Visor + Armored Collar + Pauldrons)
         sb.add_dome_sphere((0.0, -0.005, 1.690), (0.118, 0.128, 0.112), 4, {"Head": 1.0}, z_clip_min=1.625)
-        sb.add_box((0.0, 0.095, 1.710), (0.175, 0.085, 0.038), 1, {"Head": 1.0}, bevel=0.005)
+        sb.add_box((0.0, 0.095, 1.710), (0.178, 0.088, 0.040), 1, {"Head": 1.0}, bevel=0.005)
+        sb.add_box((0.0, 0.128, 1.685), (0.162, 0.018, 0.032), 5, {"Head": 1.0}, bevel=0.003)
+        # High Ballistic Neck Gorget Collar
+        sb.add_limb_tube((0.0, 0.0, 1.44), (0.0, 0.0, 1.525), 0.135, 0.115, 1, {"Chest": 1.0}, segments=14, rings=1, scale_xy=(1.05, 0.92))
+        for sx_p in (-1.0, 1.0):
+            sb.add_box((sx_p * 0.245, 0.0, 1.375), (0.045, 0.135, 0.125), 1, {f"UpperArm_{'L' if sx_p < 0 else 'R'}": 1.0}, rot_euler=(0.0, sx_p * 0.22, 0.0), bevel=0.008)
 
     # 4. Left & Right Arms + Hard-Knuckle Tactical Gloves
     for side, sx in (("L", -1.0), ("R", 1.0)):
@@ -631,33 +650,40 @@ def build_fps_arms_rig(collection: bpy.types.Collection, mats: dict) -> bpy.type
     ]
     sb = SkinnedMeshBuilder()
 
-    # Right Sleeve & Glove
-    sb.add_limb_tube((0.20, -0.34, -0.12), (0.14, -0.20, -0.11), 0.056, 0.050, 0, {"UpperArm_R": 1.0}, segments=12, rings=2)
-    sb.add_limb_tube((0.14, -0.20, -0.11), (0.042, -0.078, -0.066), 0.049, 0.038, 0, {"Forearm_R": 1.0}, segments=12, rings=3)
-    sb.add_limb_tube((0.045, -0.082, -0.068), (0.032, -0.065, -0.062), 0.040, 0.036, 1, {"Forearm_R": 1.0}, segments=12, rings=1)
-    # Right Palm, Carbon Knuckles, Trigger Finger & Wrapped Grip Fingers
+    # Right Sleeve & High-Detail Hard-Knuckle Glove (16-segment smooth viewmodel tubes!)
+    sb.add_limb_tube((0.20, -0.34, -0.12), (0.14, -0.20, -0.11), 0.056, 0.050, 0, {"UpperArm_R": 1.0}, segments=16, rings=3)
+    sb.add_limb_tube((0.14, -0.20, -0.11), (0.042, -0.078, -0.066), 0.049, 0.038, 0, {"Forearm_R": 1.0}, segments=16, rings=4)
+    sb.add_limb_tube((0.046, -0.084, -0.068), (0.032, -0.065, -0.062), 0.041, 0.037, 1, {"Forearm_R": 1.0}, segments=16, rings=1)
+    # Right Palm, 4 Individual Molded Carbon Knuckle Domes, Trigger Finger & Wrapped Grip Fingers
     sb.add_box((0.022, -0.038, -0.056), (0.032, 0.065, 0.068), 2, {"Hand_R": 1.0}, rot_euler=(-0.25, 0.0, 0.25), bevel=0.005)
-    sb.add_box((0.036, -0.035, -0.048), (0.012, 0.055, 0.020), 3, {"Hand_R": 1.0}, rot_euler=(-0.25, 0.0, 0.25), bevel=0.003)
-    sb.add_limb_tube((0.018, -0.008, -0.026), (0.004, 0.024, -0.016), 0.009, 0.007, 2, {"Index_R": 1.0}, segments=8, rings=2)
+    sb.add_box((0.036, -0.035, -0.048), (0.011, 0.056, 0.022), 3, {"Hand_R": 1.0}, rot_euler=(-0.25, 0.0, 0.25), bevel=0.004)
+    for ki in range(4):
+        ky = -0.016 - ki * 0.013
+        sb.add_box((0.040, ky, -0.046 - ki * 0.002), (0.007, 0.010, 0.012), 4, {"Hand_R": 1.0}, bevel=0.002)
+    sb.add_limb_tube((0.018, -0.008, -0.026), (0.004, 0.024, -0.016), 0.009, 0.007, 2, {"Index_R": 1.0}, segments=12, rings=2)
     for fi in range(3):
         fz = -0.045 - fi * 0.018
         sb.add_box((0.002, -0.015, fz), (0.042, 0.022, 0.015), 2, {"Hand_R": 1.0}, bevel=0.003)
 
     # Left Support Sleeve, Tactical Illuminated GPS Wristwatch & Glove
-    sb.add_limb_tube((-0.22, -0.32, -0.12), (-0.16, -0.10, -0.10), 0.056, 0.050, 0, {"UpperArm_L": 1.0}, segments=12, rings=2)
-    sb.add_limb_tube((-0.16, -0.10, -0.10), (-0.048, 0.155, -0.042), 0.049, 0.038, 0, {"Forearm_L": 1.0}, segments=12, rings=3)
-    # Tactical GPS Watch on Left Wrist (visible to FPS camera!)
-    sb.add_limb_tube((-0.052, 0.145, -0.045), (-0.038, 0.175, -0.037), 0.040, 0.038, 3, {"Forearm_L": 1.0}, segments=12, rings=1)
-    sb.add_box((-0.026, 0.162, -0.012), (0.034, 0.038, 0.014), 4, {"Forearm_L": 1.0}, rot_euler=(0.2, 0.35, -0.4), bevel=0.002)
-    sb.add_box((-0.024, 0.162, -0.005), (0.024, 0.028, 0.004), 5, {"Forearm_L": 1.0}, rot_euler=(0.2, 0.35, -0.4))
-    # Left Foregrip Hand, Thumb-over-bore / C-clamp & Fingers
+    sb.add_limb_tube((-0.22, -0.32, -0.12), (-0.16, -0.10, -0.10), 0.056, 0.050, 0, {"UpperArm_L": 1.0}, segments=16, rings=3)
+    sb.add_limb_tube((-0.16, -0.10, -0.10), (-0.048, 0.155, -0.042), 0.049, 0.038, 0, {"Forearm_L": 1.0}, segments=16, rings=4)
+    # Tactical GPS Watch on Left Wrist (Nylon Strap + Bezel + Side Crown Buttons + Cyan OLED Dial)
+    sb.add_limb_tube((-0.052, 0.145, -0.045), (-0.038, 0.175, -0.037), 0.0405, 0.0385, 3, {"Forearm_L": 1.0}, segments=16, rings=1)
+    sb.add_box((-0.026, 0.162, -0.012), (0.035, 0.039, 0.014), 4, {"Forearm_L": 1.0}, rot_euler=(0.2, 0.35, -0.4), bevel=0.003)
+    sb.add_box((-0.0235, 0.162, -0.0045), (0.025, 0.029, 0.004), 5, {"Forearm_L": 1.0}, rot_euler=(0.2, 0.35, -0.4))
+    sb.add_box((-0.010, 0.168, -0.010), (0.006, 0.008, 0.006), 4, {"Forearm_L": 1.0}, rot_euler=(0.2, 0.35, -0.4))
+    # Left Foregrip Hand, Carbon Knuckles, Thumb-over-bore / C-clamp & Fingers
     sb.add_box((-0.020, 0.225, -0.026), (0.030, 0.072, 0.062), 2, {"Hand_L": 1.0}, rot_euler=(0.15, 0.0, -0.25), bevel=0.005)
-    sb.add_box((-0.034, 0.225, -0.022), (0.012, 0.058, 0.020), 3, {"Hand_L": 1.0}, rot_euler=(0.15, 0.0, -0.25), bevel=0.003)
+    sb.add_box((-0.034, 0.225, -0.022), (0.011, 0.058, 0.022), 3, {"Hand_L": 1.0}, rot_euler=(0.15, 0.0, -0.25), bevel=0.004)
+    for ki in range(4):
+        ky = 0.204 + ki * 0.014
+        sb.add_box((-0.038, ky, -0.020), (0.007, 0.010, 0.012), 4, {"Hand_L": 1.0}, bevel=0.002)
     for fi in range(4):
         fy = 0.235 + fi * 0.014
         sb.add_box((0.004, fy, -0.036), (0.040, 0.013, 0.016), 2, {"Hand_L": 1.0}, bevel=0.003)
     # C-clamp thumb resting high along left rail
-    sb.add_limb_tube((-0.022, 0.215, 0.002), (-0.012, 0.258, 0.026), 0.010, 0.008, 2, {"Hand_L": 1.0}, segments=8, rings=2)
+    sb.add_limb_tube((-0.022, 0.215, 0.002), (-0.012, 0.258, 0.026), 0.0105, 0.0085, 2, {"Hand_L": 1.0}, segments=12, rings=2)
 
     sb.build_skinned_object("CHR_FPS_Arms_Mesh", arm_obj, fps_mats, collection, uv_scale=2.5)
 

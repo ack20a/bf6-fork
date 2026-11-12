@@ -82,42 +82,80 @@ def build_assault_rifle_m5a3(collection: bpy.types.Collection, mats: dict) -> bp
     # Upper receiver (FDE anodized/cerakote top) & Lower receiver (Gunmetal/FDE two-tone)
     add_box_to_bm(bm, (0.0, 0.015, 0.042), (0.038, 0.21, 0.042), mat_index=1)
     add_box_to_bm(bm, (0.0, 0.020, 0.008), (0.036, 0.19, 0.034), mat_index=0)
-    # Flared magazine well
+    # Brass shell deflector, forward assist plunger & ejection dust cover (+X right side)
+    add_box_to_bm(bm, (0.021, 0.004, 0.043), (0.009, 0.022, 0.024), mat_index=0, rot_euler=(0.0, 0.0, -0.35))
+    add_cylinder_to_bm(bm, (0.018, -0.028, 0.038), (0.026, -0.048, 0.038), radius=0.0055, segments=10, mat_index=0)
+    add_box_to_bm(bm, (0.0195, 0.045, 0.032), (0.003, 0.068, 0.014), mat_index=0, rot_euler=(0.0, 0.35, 0.0))
+    # Ambidextrous fire-selector levers & receiver takedown pins
+    for sx in (-1.0, 1.0):
+        add_box_to_bm(bm, (sx * 0.0195, -0.022, 0.012), (0.004, 0.024, 0.007), mat_index=2, rot_euler=(-0.45, 0.0, 0.0))
+        for py_pin in (-0.058, 0.098):
+            add_cylinder_to_bm(bm, (sx * 0.017, py_pin, 0.014), (sx * 0.020, py_pin, 0.014), radius=0.0045, segments=8, mat_index=3)
+    # Flared magazine well + mag release button
     add_box_to_bm(bm, (0.0, 0.088, -0.014), (0.039, 0.076, 0.036), mat_index=0, rot_euler=(0.08, 0.0, 0.0))
+    add_box_to_bm(bm, (0.0205, 0.065, 0.006), (0.004, 0.018, 0.011), mat_index=2)
     # Trigger guard & curved trigger
     add_box_to_bm(bm, (0.0, 0.018, -0.022), (0.014, 0.052, 0.005), mat_index=0)
     add_box_to_bm(bm, (0.0, 0.022, -0.010), (0.006, 0.008, 0.020), mat_index=3, rot_euler=(0.35, 0.0, 0.0))
 
-    # Ergonomic angled FDE Pistol Grip (tilted back ~17 deg)
+    # Ergonomic angled FDE Pistol Grip with backstrap ribs
     add_box_to_bm(bm, (0.0, -0.032, -0.056), (0.031, 0.044, 0.105), mat_index=1, rot_euler=(-0.30, 0.0, 0.0))
     add_box_to_bm(bm, (0.0, -0.048, -0.106), (0.033, 0.048, 0.012), mat_index=2, rot_euler=(-0.30, 0.0, 0.0))
+    for gi in range(4):
+        gz = -0.035 - gi * 0.017
+        gy = -0.026 - gi * 0.005
+        add_box_to_bm(bm, (0.0, gy, gz), (0.0325, 0.038, 0.005), mat_index=2, rot_euler=(-0.30, 0.0, 0.0))
 
-    # Buffer tube & Collapsible FDE Tactical SOPMOD Buttstock (-Y)
-    add_cylinder_to_bm(bm, (0.0, -0.09, 0.038), (0.0, -0.32, 0.038), radius=0.015, segments=12, mat_index=0)
+    # Buffer tube, Castle Nut & Collapsible FDE Tactical SOPMOD Buttstock (-Y)
+    add_cylinder_to_bm(bm, (0.0, -0.088, 0.038), (0.0, -0.106, 0.038), radius=0.019, segments=14, mat_index=0)
+    add_cylinder_to_bm(bm, (0.0, -0.09, 0.038), (0.0, -0.32, 0.038), radius=0.015, segments=16, mat_index=0)
     add_box_to_bm(bm, (0.0, -0.255, 0.040), (0.044, 0.155, 0.046), mat_index=1)
+    # Sloped SOPMOD cheekweld pads & stock latch lever
+    for sx in (-0.018, 0.018):
+        add_box_to_bm(bm, (sx, -0.250, 0.046), (0.018, 0.145, 0.026), mat_index=1, rot_euler=(0.0, sx * 12.0, 0.0))
     add_box_to_bm(bm, (0.0, -0.275, -0.005), (0.026, 0.115, 0.058), mat_index=1, rot_euler=(0.24, 0.0, 0.0))
-    # Rubberized black buttpad
+    # Rubberized ribbed black buttpad & QD sling socket
     add_box_to_bm(bm, (0.0, -0.336, 0.016), (0.045, 0.016, 0.118), mat_index=2)
+    add_cylinder_to_bm(bm, (-0.023, -0.305, 0.028), (0.023, -0.305, 0.028), radius=0.006, segments=10, mat_index=0)
 
-    # Free-float M-LOK Tactical Handguard (Y: 0.12 -> 0.37)
-    add_box_to_bm(bm, (0.0, 0.245, 0.040), (0.040, 0.25, 0.048), mat_index=1)
-    # Side cooling M-LOK slot recesses (dark gunmetal core contrast)
-    add_box_to_bm(bm, (0.0, 0.245, 0.040), (0.0415, 0.21, 0.014), mat_index=2)
+    # Free-float Ventilated M-LOK Tactical Handguard (Y: 0.12 -> 0.37) + Visible Steel Gas Tube!
+    add_cylinder_to_bm(bm, (0.0, 0.12, 0.052), (0.0, 0.375, 0.052), radius=0.0035, segments=8, mat_index=3)
+    # Upper & lower handguard spine + 6 vertical M-LOK stanchion ribs creating realistic cooling vents
+    add_box_to_bm(bm, (0.0, 0.245, 0.056), (0.036, 0.252, 0.016), mat_index=1)
+    add_box_to_bm(bm, (0.0, 0.245, 0.022), (0.034, 0.252, 0.014), mat_index=1)
+    for vi in range(6):
+        vy = 0.132 + vi * 0.045
+        add_box_to_bm(bm, (0.0, vy, 0.040), (0.041, 0.018, 0.046), mat_index=1)
+    # Side M-LOK accessory rail sections
+    for sx in (-0.021, 0.021):
+        add_box_to_bm(bm, (sx, 0.315, 0.040), (0.005, 0.085, 0.014), mat_index=0)
 
-    # Full-length continuous Top Picatinny Rail (Y: -0.08 -> +0.365)
+    # Full-length continuous Top Picatinny Rail (Y: -0.08 -> +0.365) + Folded Front/Rear Backup Iron Sights
     _add_picatinny_rail(bm, -0.08, 0.365, 0.063, mat_index=0)
+    add_box_to_bm(bm, (0.0, -0.062, 0.074), (0.028, 0.034, 0.010), mat_index=2)  # Folded rear BUIS
+    add_box_to_bm(bm, (0.0, 0.352, 0.074), (0.026, 0.028, 0.010), mat_index=2)   # Folded front BUIS
 
-    # Barrel, Gas Block & 3-Prong Flash Hider (+Y)
-    add_cylinder_to_bm(bm, (0.0, 0.12, 0.040), (0.0, 0.455, 0.040), radius=0.0095, segments=12, mat_index=3)
-    add_box_to_bm(bm, (0.0, 0.382, 0.046), (0.020, 0.028, 0.028), mat_index=3)  # Gas block
-    add_cylinder_to_bm(bm, (0.0, 0.455, 0.040), (0.0, 0.495, 0.040), radius=0.0125, segments=12, mat_index=0)
+    # Smooth 20-Segment Barrel, Adjustable Gas Block & 3-Prong Open Flash Hider (+Y)
+    add_cylinder_to_bm(bm, (0.0, 0.12, 0.040), (0.0, 0.455, 0.040), radius=0.0095, segments=20, mat_index=3)
+    add_box_to_bm(bm, (0.0, 0.382, 0.046), (0.020, 0.028, 0.028), mat_index=3)
+    add_cylinder_to_bm(bm, (0.0, 0.396, 0.053), (0.0, 0.408, 0.053), radius=0.005, segments=10, mat_index=0)
+    add_cylinder_to_bm(bm, (0.0, 0.452, 0.040), (0.0, 0.472, 0.040), radius=0.0125, segments=18, mat_index=0)
+    # 3 Flash Hider Prongs around recessed muzzle bore
+    for p_ang in (0.52, 2.62, 4.71):
+        px = math.cos(p_ang) * 0.0085
+        pz = 0.040 + math.sin(p_ang) * 0.0085
+        add_box_to_bm(bm, (px, 0.484, pz), (0.0045, 0.026, 0.0045), mat_index=0)
+    add_cylinder_to_bm(bm, (0.0, 0.470, 0.040), (0.0, 0.474, 0.040), radius=0.006, segments=12, mat_index=2)
 
-    # Underbarrel Stubby Tactical Foregrip
-    add_box_to_bm(bm, (0.0, 0.255, -0.018), (0.028, 0.036, 0.072), mat_index=2, rot_euler=(-0.10, 0.0, 0.0))
+    # Underbarrel Ribbed Stubby Tactical Foregrip
+    add_box_to_bm(bm, (0.0, 0.255, 0.008), (0.032, 0.044, 0.014), mat_index=0)
+    add_box_to_bm(bm, (0.0, 0.255, -0.022), (0.027, 0.035, 0.064), mat_index=2, rot_euler=(-0.10, 0.0, 0.0))
 
-    # Front Rail Tactical Laser Box (PEQ-15 style in FDE)
-    add_box_to_bm(bm, (0.0, 0.315, 0.080), (0.052, 0.078, 0.022), mat_index=1)
-    add_cylinder_to_bm(bm, (0.016, 0.354, 0.080), (0.016, 0.362, 0.080), radius=0.005, segments=8, mat_index=5)
+    # Front Left-Offset / Low-Profile Tactical Laser Box (PEQ-15 style in FDE, kept clear of optic sightline!)
+    add_box_to_bm(bm, (0.0, 0.315, 0.078), (0.052, 0.078, 0.018), mat_index=1)
+    add_cylinder_to_bm(bm, (0.016, 0.354, 0.079), (0.016, 0.362, 0.079), radius=0.005, segments=10, mat_index=5)
+    add_cylinder_to_bm(bm, (-0.015, 0.354, 0.079), (-0.015, 0.360, 0.079), radius=0.006, segments=10, mat_index=4)
+    add_cylinder_to_bm(bm, (0.0, 0.312, 0.088), (0.0, 0.312, 0.093), radius=0.008, segments=10, mat_index=2)
 
     finalize_bmesh_object(
         "WPN_M5A3_Body",
@@ -129,19 +167,20 @@ def build_assault_rifle_m5a3(collection: bpy.types.Collection, mats: dict) -> bp
         bevel_width=0.0012,
     )
 
-    # 2. Animatable Curved 30-Round Polymer Magazine (Pivot at Magwell catch: 0, 0.088, -0.015)
+    # 2. Animatable Curved 30-Round Polymer PMAG (Waffle ribs + floorplate + translucent ammo window)
     bm_mag = bmesh.new()
-    n_seg = 5
+    n_seg = 6
     for i in range(n_seg):
         t = i / (n_seg - 1)
-        mz = -0.020 - i * 0.032
-        my = 0.004 + (t * t) * 0.028
+        mz = -0.018 - i * 0.026
+        my = 0.003 + (t * t) * 0.028
         tilt = 0.08 + t * 0.22
-        add_box_to_bm(bm_mag, (0.0, my, mz), (0.025, 0.064, 0.036), mat_index=1, rot_euler=(tilt, 0.0, 0.0))
+        add_box_to_bm(bm_mag, (0.0, my, mz), (0.0245, 0.063, 0.030), mat_index=1, rot_euler=(tilt, 0.0, 0.0))
+        add_box_to_bm(bm_mag, (0.0, my, mz), (0.0265, 0.054, 0.006), mat_index=1, rot_euler=(tilt, 0.0, 0.0))
     # Mag floorplate
     add_box_to_bm(bm_mag, (0.0, 0.036, -0.155), (0.028, 0.070, 0.010), mat_index=2, rot_euler=(0.30, 0.0, 0.0))
     # Ammo window strip
-    add_box_to_bm(bm_mag, (0.0, 0.014, -0.078), (0.0265, 0.016, 0.065), mat_index=4, rot_euler=(0.18, 0.0, 0.0))
+    add_box_to_bm(bm_mag, (0.0, 0.014, -0.078), (0.0268, 0.016, 0.065), mat_index=4, rot_euler=(0.18, 0.0, 0.0))
 
     finalize_bmesh_object(
         "WPN_M5A3_Magazine",
@@ -171,7 +210,7 @@ def build_assault_rifle_m5a3(collection: bpy.types.Collection, mats: dict) -> bp
 
     # 4. Animatable Ambidextrous Charging Handle
     bm_ch = bmesh.new()
-    add_box_to_bm(bm_ch, (0.0, -0.012, 0.0), (0.052, 0.016, 0.010), mat_index=0)
+    add_box_to_bm(bm_ch, (0.0, -0.012, 0.0), (0.054, 0.016, 0.010), mat_index=0)
     add_box_to_bm(bm_ch, (0.0, 0.035, 0.0), (0.012, 0.095, 0.008), mat_index=0)
     finalize_bmesh_object(
         "WPN_M5A3_ChargingHandle",
@@ -181,20 +220,28 @@ def build_assault_rifle_m5a3(collection: bpy.types.Collection, mats: dict) -> bp
         parent=root,
         location=(0.0, -0.075, 0.056),
         uv_scale=4.0,
+        bevel_width=0.0008,
         extras={"animatable_part": "charging_handle"},
     )
 
-    # 5. Detachable Holographic Weapon Sight (on Top Rail at Z=0.070)
+    # 5. Detachable EOTech EXPS3 Holographic Weapon Sight (on Top Rail at Z=0.070)
     bm_opt = bmesh.new()
-    # Base clamp & battery housing
+    # Base QD clamp, throw lever & transverse CR123 battery cap
     add_box_to_bm(bm_opt, (0.0, 0.005, 0.010), (0.046, 0.092, 0.018), mat_index=0)
-    # Protective aluminum hood pillars & roof
-    add_box_to_bm(bm_opt, (-0.022, -0.005, 0.036), (0.006, 0.062, 0.038), mat_index=0)
-    add_box_to_bm(bm_opt, (0.022, -0.005, 0.036), (0.006, 0.062, 0.038), mat_index=0)
-    add_box_to_bm(bm_opt, (0.0, -0.005, 0.056), (0.050, 0.062, 0.006), mat_index=0)
-    # Reflective holographic glass window & glowing red center dot reticle
-    add_box_to_bm(bm_opt, (0.0, -0.005, 0.036), (0.036, 0.003, 0.030), mat_index=4)
-    add_box_to_bm(bm_opt, (0.0, -0.008, 0.036), (0.003, 0.002, 0.003), mat_index=5)
+    add_box_to_bm(bm_opt, (-0.025, -0.005, 0.008), (0.006, 0.042, 0.011), mat_index=2)
+    add_cylinder_to_bm(bm_opt, (-0.024, 0.034, 0.014), (0.026, 0.034, 0.014), radius=0.010, segments=14, mat_index=1)
+    # Protective sculpted aluminum hood pillars, angled top corners & roof
+    add_box_to_bm(bm_opt, (-0.022, -0.005, 0.036), (0.0055, 0.062, 0.038), mat_index=1)
+    add_box_to_bm(bm_opt, (0.022, -0.005, 0.036), (0.0055, 0.062, 0.038), mat_index=1)
+    add_box_to_bm(bm_opt, (0.0, -0.005, 0.056), (0.049, 0.062, 0.0055), mat_index=1)
+    # Side windage/elevation dial bosses
+    add_cylinder_to_bm(bm_opt, (0.022, 0.012, 0.022), (0.026, 0.012, 0.022), radius=0.005, segments=10, mat_index=0)
+    add_cylinder_to_bm(bm_opt, (0.022, -0.012, 0.022), (0.026, -0.012, 0.022), radius=0.005, segments=10, mat_index=0)
+    # Reflective holographic glass window & crisp glowing red center reticle dot + 4 tick marks
+    add_box_to_bm(bm_opt, (0.0, -0.005, 0.036), (0.036, 0.0025, 0.030), mat_index=4)
+    add_box_to_bm(bm_opt, (0.0, -0.008, 0.036), (0.0022, 0.0018, 0.0022), mat_index=5)
+    for dx_r, dz_r, sw, sh in ((-0.007, 0.0, 0.003, 0.001), (0.007, 0.0, 0.003, 0.001), (0.0, 0.007, 0.001, 0.003), (0.0, -0.007, 0.001, 0.003)):
+        add_box_to_bm(bm_opt, (dx_r, -0.008, 0.036 + dz_r), (sw, 0.0015, sh), mat_index=5)
 
     finalize_bmesh_object(
         "WPN_M5A3_OpticHolo",
@@ -240,26 +287,28 @@ def build_launcher_rpg7v2(collection: bpy.types.Collection, mats: dict) -> bpy.t
     ]
 
     bm = bmesh.new()
-    # Main steel 40mm launch tube (Y: -0.38 -> +0.44)
-    add_cylinder_to_bm(bm, (0.0, -0.38, 0.0), (0.0, 0.44, 0.0), radius=0.024, segments=16, mat_index=0)
-    # Expansion chamber bulge + FDE thermal shroud (Y: -0.26 -> +0.06)
-    add_cylinder_to_bm(bm, (0.0, -0.26, 0.0), (0.0, 0.06, 0.0), radius=0.033, segments=16, mat_index=1)
-    # Steel clamping rings
+    # Main steel 40mm launch tube (Y: -0.38 -> +0.44, smooth 24 segments)
+    add_cylinder_to_bm(bm, (0.0, -0.38, 0.0), (0.0, 0.44, 0.0), radius=0.024, segments=24, mat_index=0)
+    # Expansion chamber bulge + FDE ribbed thermal shroud (Y: -0.26 -> +0.06)
+    add_cylinder_to_bm(bm, (0.0, -0.26, 0.0), (0.0, 0.06, 0.0), radius=0.033, segments=24, mat_index=1)
+    for ry_rib in (-0.20, -0.15, -0.05, 0.00):
+        add_cylinder_to_bm(bm, (0.0, ry_rib - 0.004, 0.0), (0.0, ry_rib + 0.004, 0.0), radius=0.0342, segments=24, mat_index=1)
+    # Steel clamping rings + top rail bridge
     for cy in (-0.25, -0.10, 0.05):
-        add_cylinder_to_bm(bm, (0.0, cy - 0.008, 0.0), (0.0, cy + 0.008, 0.0), radius=0.035, segments=16, mat_index=4)
+        add_cylinder_to_bm(bm, (0.0, cy - 0.008, 0.0), (0.0, cy + 0.008, 0.0), radius=0.0355, segments=24, mat_index=4)
+    _add_picatinny_rail(bm, 0.04, 0.24, 0.025, mat_index=4)
 
-    # Flared rear Venturi blast cone (Y: -0.38 -> -0.52)
+    # Flared rear Venturi blast cone (Y: -0.38 -> -0.52, smooth 24 segments) + cooling fins
     ret_cone = bmesh.ops.create_cone(
         bm,
         cap_ends=True,
         cap_tris=False,
-        segments=16,
-        radius1=0.048,
+        segments=24,
+        radius1=0.050,
         radius2=0.025,
         depth=0.14,
     )
     for v in ret_cone["verts"]:
-        # Rotate cone from Z-axis to +Y axis and place at Y = -0.45
         y_new = v.co.z - 0.45
         z_new = -v.co.y
         v.co.y, v.co.z = y_new, z_new
@@ -267,20 +316,26 @@ def build_launcher_rpg7v2(collection: bpy.types.Collection, mats: dict) -> bpy.t
     for f in bm.faces:
         if all(v in vset for v in f.verts):
             f.material_index = 0
+    for cy_fin in (-0.33, -0.355):
+        add_cylinder_to_bm(bm, (0.0, cy_fin - 0.004, 0.0), (0.0, cy_fin + 0.004, 0.0), radius=0.031, segments=20, mat_index=4)
 
-    # Front muzzle collar
-    add_cylinder_to_bm(bm, (0.0, 0.42, 0.0), (0.0, 0.445, 0.0), radius=0.029, segments=16, mat_index=4)
+    # Front muzzle collar + recessed dark bore
+    add_cylinder_to_bm(bm, (0.0, 0.42, 0.0), (0.0, 0.445, 0.0), radius=0.029, segments=24, mat_index=4)
+    add_cylinder_to_bm(bm, (0.0, 0.440, 0.0), (0.0, 0.446, 0.0), radius=0.020, segments=20, mat_index=2)
 
     # Front Trigger Pistol Grip (Y = +0.16) & Rear Support Grip (Y = -0.06)
     add_box_to_bm(bm, (0.0, 0.16, -0.068), (0.028, 0.040, 0.105), mat_index=2, rot_euler=(-0.22, 0.0, 0.0))
-    add_box_to_bm(bm, (0.0, 0.20, -0.036), (0.012, 0.045, 0.006), mat_index=4)  # Trigger guard
+    add_box_to_bm(bm, (0.0, 0.20, -0.036), (0.012, 0.045, 0.006), mat_index=4)
+    add_box_to_bm(bm, (0.0, 0.185, -0.026), (0.005, 0.009, 0.018), mat_index=0, rot_euler=(0.3, 0.0, 0.0))
     add_box_to_bm(bm, (0.0, -0.06, -0.068), (0.028, 0.038, 0.098), mat_index=2, rot_euler=(-0.15, 0.0, 0.0))
 
-    # Front & Rear Folding Iron Sight Posts + Side Tactical Optic Mount
-    add_box_to_bm(bm, (0.0, 0.39, 0.048), (0.018, 0.018, 0.052), mat_index=4)
+    # Front & Rear Folding Iron Sight Hoop + Side Tactical Reflex Optic Mount (open window!)
+    add_box_to_bm(bm, (0.0, 0.39, 0.046), (0.022, 0.014, 0.048), mat_index=4)
     add_box_to_bm(bm, (-0.036, 0.08, 0.032), (0.018, 0.095, 0.045), mat_index=4)
-    add_box_to_bm(bm, (-0.042, 0.08, 0.068), (0.034, 0.056, 0.032), mat_index=4)
-    add_box_to_bm(bm, (-0.042, 0.08, 0.072), (0.026, 0.004, 0.022), mat_index=5)
+    add_box_to_bm(bm, (-0.056, 0.08, 0.072), (0.005, 0.054, 0.030), mat_index=4)
+    add_box_to_bm(bm, (-0.028, 0.08, 0.072), (0.005, 0.054, 0.030), mat_index=4)
+    add_box_to_bm(bm, (-0.042, 0.08, 0.088), (0.033, 0.054, 0.005), mat_index=4)
+    add_box_to_bm(bm, (-0.042, 0.08, 0.072), (0.024, 0.003, 0.025), mat_index=5)
 
     finalize_bmesh_object(
         "WPN_RPG7_Tube",
@@ -292,9 +347,8 @@ def build_launcher_rpg7v2(collection: bpy.types.Collection, mats: dict) -> bpy.t
         bevel_width=0.001,
     )
 
-    # Separate Detachable PG-7VL Shaped-Charge Warhead (Child at (0, 0.44, 0))
+    # Separate Detachable PG-7VL Shaped-Charge Warhead (Child at (0, 0.44, 0)) + 4 Stabilizer Fins
     bm_rkt = bmesh.new()
-    # Profile along local Y from -0.06 (inside barrel) to +0.34 (nose fuse tip)
     profile_yr = [
         (-0.08, 0.019),
         (0.00, 0.021),
@@ -304,7 +358,7 @@ def build_launcher_rpg7v2(collection: bpy.types.Collection, mats: dict) -> bpy.t
         (0.34, 0.011),
         (0.35, 0.0001),
     ]
-    n_seg = 16
+    n_seg = 24
     rings = []
     for py, pr in profile_yr:
         ring = []
@@ -315,12 +369,20 @@ def build_launcher_rpg7v2(collection: bpy.types.Collection, mats: dict) -> bpy.t
 
     for r_i in range(len(rings) - 1):
         r0, r1 = rings[r_i], rings[r_i + 1]
-        m_idx = 0 if r_i >= 4 else 3  # Steel fuse tip, ordnance olive warhead body
+        m_idx = 0 if r_i >= 4 else 3
         for s in range(n_seg):
             sn = (s + 1) % n_seg
             f = bm_rkt.faces.new((r0[s], r0[sn], r1[sn], r1[s]))
             f.material_index = m_idx
     bm_rkt.faces.new(rings[0]).material_index = 0
+    for f_ang in (0.0, 0.5 * math.pi, math.pi, 1.5 * math.pi):
+        add_box_to_bm(
+            bm_rkt,
+            (math.cos(f_ang) * 0.024, 0.015, math.sin(f_ang) * 0.024),
+            (0.018, 0.045, 0.003),
+            mat_index=4,
+            rot_euler=(0.0, -f_ang, 0.0),
+        )
 
     finalize_bmesh_object(
         "WPN_RPG7_Warhead",
@@ -365,36 +427,53 @@ def build_sniper_m2010(collection: bpy.types.Collection, mats: dict) -> bpy.type
     ]
 
     bm = bmesh.new()
-    # Machined FDE chassis center block & slotted long forend
+    # Machined FDE chassis center block & ventilated M-LOK long forend
     add_box_to_bm(bm, (0.0, 0.02, 0.022), (0.040, 0.24, 0.046), mat_index=0)
-    add_box_to_bm(bm, (0.0, 0.28, 0.026), (0.042, 0.30, 0.042), mat_index=0)
-    _add_picatinny_rail(bm, -0.06, 0.42, 0.047, mat_index=1)
+    add_box_to_bm(bm, (0.0, 0.28, 0.014), (0.040, 0.30, 0.020), mat_index=0)
+    add_box_to_bm(bm, (0.0, 0.28, 0.041), (0.038, 0.30, 0.012), mat_index=0)
+    for vi in range(5):
+        add_box_to_bm(bm, (0.0, 0.16 + vi * 0.06, 0.028), (0.042, 0.022, 0.040), mat_index=0)
+    _add_picatinny_rail(bm, -0.06, 0.43, 0.047, mat_index=1)
 
     # Pistol grip
     add_box_to_bm(bm, (0.0, -0.045, -0.048), (0.030, 0.042, 0.10), mat_index=3, rot_euler=(-0.26, 0.0, 0.0))
 
-    # Skeletonized Tactical Precision Stock (-Y: -0.10 -> -0.38) + Cheek Riser
+    # Skeletonized Tactical Precision Stock (-Y: -0.10 -> -0.38) + Cheek Riser + Adjustment Wheel + Rear Monopod
     add_box_to_bm(bm, (0.0, -0.24, 0.028), (0.028, 0.28, 0.022), mat_index=0)
     add_box_to_bm(bm, (0.0, -0.24, -0.032), (0.022, 0.26, 0.018), mat_index=0, rot_euler=(0.12, 0.0, 0.0))
-    add_box_to_bm(bm, (0.0, -0.23, 0.052), (0.034, 0.13, 0.024), mat_index=3)  # Black cheekpiece
-    add_box_to_bm(bm, (0.0, -0.385, 0.002), (0.038, 0.020, 0.125), mat_index=3)  # Buttpad
+    add_box_to_bm(bm, (0.0, -0.23, 0.052), (0.034, 0.13, 0.024), mat_index=3)
+    add_cylinder_to_bm(bm, (-0.018, -0.23, 0.028), (0.018, -0.23, 0.028), radius=0.014, segments=14, mat_index=1)
+    add_cylinder_to_bm(bm, (0.0, -0.34, -0.045), (0.0, -0.34, -0.075), radius=0.010, segments=12, mat_index=1)
+    add_box_to_bm(bm, (0.0, -0.385, 0.002), (0.038, 0.020, 0.125), mat_index=3)
 
-    # Long Free-Float Heavy Barrel (Y: 0.14 -> 0.72) + Tank-Style 3-Port Muzzle Brake
-    add_cylinder_to_bm(bm, (0.0, 0.14, 0.032), (0.0, 0.71, 0.032), radius=0.0115, segments=12, mat_index=2)
-    add_box_to_bm(bm, (0.0, 0.735, 0.032), (0.032, 0.062, 0.024), mat_index=1)
+    # Long Free-Float Fluted Heavy Match Barrel (Y: 0.14 -> 0.71, 20 segs) + 3-Port Tank Muzzle Brake
+    add_cylinder_to_bm(bm, (0.0, 0.14, 0.032), (0.0, 0.71, 0.032), radius=0.0115, segments=20, mat_index=2)
+    for f_ang in (0.4, 1.2, 1.95, 2.75, 3.55, 4.35, 5.1, 5.9):
+        add_box_to_bm(
+            bm,
+            (math.cos(f_ang) * 0.011, 0.56, 0.032 + math.sin(f_ang) * 0.011),
+            (0.003, 0.24, 0.003),
+            mat_index=1,
+        )
+    # 3-Chamber Muzzle Brake with open side ports
+    add_box_to_bm(bm, (0.0, 0.738, 0.032), (0.034, 0.068, 0.006), mat_index=1)
+    add_box_to_bm(bm, (0.0, 0.738, 0.042), (0.034, 0.068, 0.005), mat_index=1)
+    add_box_to_bm(bm, (0.0, 0.738, 0.022), (0.034, 0.068, 0.005), mat_index=1)
+    for by in (0.712, 0.732, 0.752, 0.768):
+        add_box_to_bm(bm, (0.0, by, 0.032), (0.034, 0.008, 0.025), mat_index=1)
 
     # Folded Front Bipod Legs under forend (Y: 0.41 -> 0.59)
     for sx in (-0.026, 0.026):
-        add_cylinder_to_bm(bm, (sx, 0.41, -0.002), (sx, 0.58, -0.002), radius=0.008, segments=8, mat_index=1)
-        add_cylinder_to_bm(bm, (sx, 0.58, -0.002), (sx, 0.595, -0.002), radius=0.013, segments=8, mat_index=3)
+        add_cylinder_to_bm(bm, (sx, 0.41, -0.002), (sx, 0.58, -0.002), radius=0.008, segments=12, mat_index=1)
+        add_cylinder_to_bm(bm, (sx, 0.58, -0.002), (sx, 0.598, -0.002), radius=0.0135, segments=12, mat_index=3)
 
     finalize_bmesh_object("WPN_M2010_Chassis", bm, s_mats, collection, parent=root, uv_scale=2.2, bevel_width=0.001)
 
     # Animatable Bolt Handle
     bm_bolt = bmesh.new()
-    add_cylinder_to_bm(bm_bolt, (0.0, -0.06, 0.0), (0.0, 0.06, 0.0), radius=0.009, segments=10, mat_index=2)
-    add_cylinder_to_bm(bm_bolt, (0.0, -0.04, 0.0), (0.042, -0.048, -0.014), radius=0.005, segments=8, mat_index=1)
-    add_cylinder_to_bm(bm_bolt, (0.038, -0.048, -0.014), (0.052, -0.052, -0.020), radius=0.011, segments=10, mat_index=3)
+    add_cylinder_to_bm(bm_bolt, (0.0, -0.06, 0.0), (0.0, 0.06, 0.0), radius=0.009, segments=16, mat_index=2)
+    add_cylinder_to_bm(bm_bolt, (0.0, -0.04, 0.0), (0.042, -0.048, -0.014), radius=0.005, segments=12, mat_index=1)
+    add_cylinder_to_bm(bm_bolt, (0.038, -0.048, -0.014), (0.054, -0.052, -0.020), radius=0.0115, segments=16, mat_index=3)
     finalize_bmesh_object(
         "WPN_M2010_Bolt",
         bm_bolt,
@@ -416,24 +495,26 @@ def build_sniper_m2010(collection: bpy.types.Collection, mats: dict) -> bpy.type
         collection,
         parent=root,
         location=(0.0, 0.075, -0.005),
+        bevel_width=0.001,
         extras={"animatable_part": "magazine"},
     )
 
-    # High-Power 8x Variable Sniper Scope
+    # High-Power 8x Variable Sniper Scope (Smooth 24-segment optics, Parallax/Windage/Elevation Turrets + Throw Lever)
     bm_scp = bmesh.new()
-    # Dual scope rings
     for ry in (-0.055, 0.065):
         add_box_to_bm(bm_scp, (0.0, ry, -0.012), (0.036, 0.022, 0.026), mat_index=1)
-    # Main 34mm scope tube + Rear ocular bell + Front 50mm objective sunshade
-    add_cylinder_to_bm(bm_scp, (0.0, -0.13, 0.012), (0.0, 0.13, 0.012), radius=0.017, segments=16, mat_index=1)
-    add_cylinder_to_bm(bm_scp, (0.0, -0.175, 0.012), (0.0, -0.115, 0.012), radius=0.022, segments=16, mat_index=1)
-    add_cylinder_to_bm(bm_scp, (0.0, 0.125, 0.012), (0.0, 0.225, 0.012), radius=0.027, segments=16, mat_index=1)
+    add_cylinder_to_bm(bm_scp, (0.0, -0.13, 0.012), (0.0, 0.13, 0.012), radius=0.017, segments=24, mat_index=1)
+    add_cylinder_to_bm(bm_scp, (0.0, -0.175, 0.012), (0.0, -0.115, 0.012), radius=0.0225, segments=24, mat_index=1)
+    add_cylinder_to_bm(bm_scp, (0.0, -0.122, 0.012), (0.0, -0.105, 0.012), radius=0.024, segments=24, mat_index=3)
+    add_box_to_bm(bm_scp, (-0.024, -0.114, 0.028), (0.018, 0.008, 0.008), mat_index=1, rot_euler=(0.0, -0.6, 0.0))
+    add_cylinder_to_bm(bm_scp, (0.0, 0.125, 0.012), (0.0, 0.228, 0.012), radius=0.0275, segments=24, mat_index=1)
     # Coated front/rear lenses
-    add_cylinder_to_bm(bm_scp, (0.0, 0.223, 0.012), (0.0, 0.226, 0.012), radius=0.024, segments=16, mat_index=4)
-    add_cylinder_to_bm(bm_scp, (0.0, -0.176, 0.012), (0.0, -0.173, 0.012), radius=0.019, segments=16, mat_index=4)
-    # Elevation & Windage Turret Knobs
-    add_cylinder_to_bm(bm_scp, (0.0, 0.005, 0.028), (0.0, 0.005, 0.048), radius=0.015, segments=12, mat_index=1)
-    add_cylinder_to_bm(bm_scp, (0.016, 0.005, 0.012), (0.036, 0.005, 0.012), radius=0.014, segments=12, mat_index=1)
+    add_cylinder_to_bm(bm_scp, (0.0, 0.225, 0.012), (0.0, 0.228, 0.012), radius=0.0245, segments=24, mat_index=4)
+    add_cylinder_to_bm(bm_scp, (0.0, -0.176, 0.012), (0.0, -0.173, 0.012), radius=0.0195, segments=24, mat_index=4)
+    # Elevation, Windage & Side Parallax Turret Knobs
+    add_cylinder_to_bm(bm_scp, (0.0, 0.005, 0.028), (0.0, 0.005, 0.050), radius=0.0155, segments=18, mat_index=3)
+    add_cylinder_to_bm(bm_scp, (0.016, 0.005, 0.012), (0.038, 0.005, 0.012), radius=0.0145, segments=18, mat_index=3)
+    add_cylinder_to_bm(bm_scp, (-0.016, 0.005, 0.012), (-0.036, 0.005, 0.012), radius=0.0135, segments=18, mat_index=3)
 
     finalize_bmesh_object(
         "WPN_M2010_Scope8x",

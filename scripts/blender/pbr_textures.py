@@ -161,93 +161,103 @@ def build_gltf_material(
 
 
 def create_all_materials() -> dict[str, bpy.types.Material]:
-    """Generate the full Battlefield 6 Tactical Environment PBR Material Library."""
-    res = 256
+    """Generate the full High-Detail 512x512 Battlefield 6 Tactical Environment PBR Material Library."""
+    res = 512
     mats: dict[str, bpy.types.Material] = {}
 
     y_coord = np.linspace(0, 1, res, endpoint=False, dtype=np.float32)[:, None]
     x_coord = np.linspace(0, 1, res, endpoint=False, dtype=np.float32)[None, :]
 
-    # 1. Exterior Architectural Concrete (formwork seams + subtle aggregate + grime)
-    n1 = fbm_tileable(res, 6, 4, seed=101)
-    n2 = fbm_tileable(res, 24, 3, seed=102)
-    seams_h = np.exp(-((np.mod(y_coord * 4.0, 1.0) - 0.5) ** 2) / 0.0012) * 0.12
-    seams_v = np.exp(-((np.mod(x_coord * 2.0, 1.0) - 0.5) ** 2) / 0.0012) * 0.08
-    conc_h = np.clip(n1 * 0.55 + n2 * 0.45 - seams_h - seams_v, 0.0, 1.0)
+    # 1. Exterior Architectural Concrete (crisp formwork seams + tie-rod holes + fine pores + rain streaks)
+    n1 = fbm_tileable(res, 6, 5, seed=101)
+    n2 = fbm_tileable(res, 32, 4, seed=102)
+    pores = (fbm_tileable(res, 64, 2, seed=103) < 0.22).astype(np.float32) * 0.08
+    rain = fbm_tileable(res, 16, 3, seed=104)
+    seams_h = np.exp(-((np.mod(y_coord * 4.0, 1.0) - 0.5) ** 2) / 0.00055) * 0.16
+    seams_v = np.exp(-((np.mod(x_coord * 2.0, 1.0) - 0.5) ** 2) / 0.00055) * 0.12
+    # Formwork tie-rod dimples (2x4 grid per tile)
+    tx = (np.mod(x_coord * 4.0 + 0.25, 1.0) - 0.5)
+    ty = (np.mod(y_coord * 4.0 + 0.25, 1.0) - 0.5)
+    tie_holes = np.exp(-(tx * tx + ty * ty) / 0.0014) * 0.26
+    conc_h = np.clip(n1 * 0.50 + n2 * 0.45 - seams_h - seams_v - tie_holes - pores, 0.0, 1.0)
+    streak_dark = 0.92 + 0.12 * rain
     conc_col = np.stack([
-        0.46 + 0.14 * conc_h - 0.03 * n2,
-        0.45 + 0.14 * conc_h - 0.03 * n2,
-        0.43 + 0.13 * conc_h - 0.02 * n2,
+        (0.47 + 0.15 * conc_h - 0.04 * n2) * streak_dark,
+        (0.45 + 0.14 * conc_h - 0.04 * n2) * streak_dark,
+        (0.42 + 0.13 * conc_h - 0.03 * n2) * streak_dark,
     ], axis=-1)
     mats["concrete_ext"] = build_gltf_material(
         "MAT_Concrete_Exterior",
         np.clip(conc_col, 0, 1),
-        roughness_map=0.78 + 0.16 * (1.0 - conc_h),
-        normal_rgb=height_to_normal(conc_h, 2.2),
+        roughness_map=0.76 + 0.18 * (1.0 - conc_h),
+        normal_rgb=height_to_normal(conc_h, 2.9),
         metallic=0.0,
     )
 
-    # 2. Broken / Fractured Inner Concrete (dark rough aggregate for blast seams & rubble)
-    brk_n = fbm_tileable(res, 12, 4, seed=202)
-    speck = (fbm_tileable(res, 32, 2, seed=203) > 0.68).astype(np.float32) * 0.12
-    brk_h = np.clip(brk_n * 0.8 + speck, 0.0, 1.0)
+    # 2. Broken / Fractured Inner Concrete (high-relief crushed aggregate for blast seams & rubble)
+    brk_n = fbm_tileable(res, 14, 5, seed=202)
+    speck = (fbm_tileable(res, 48, 3, seed=203) > 0.64).astype(np.float32) * 0.16
+    brk_h = np.clip(brk_n * 0.78 + speck, 0.0, 1.0)
     brk_col = np.stack([
-        0.28 + 0.16 * brk_h,
-        0.27 + 0.15 * brk_h,
-        0.26 + 0.14 * brk_h,
+        0.27 + 0.18 * brk_h,
+        0.26 + 0.17 * brk_h,
+        0.25 + 0.15 * brk_h,
     ], axis=-1)
     mats["concrete_broken"] = build_gltf_material(
         "MAT_Concrete_Broken",
         np.clip(brk_col, 0, 1),
         roughness_map=0.88 + 0.10 * (1.0 - brk_h),
-        normal_rgb=height_to_normal(brk_h, 4.0),
+        normal_rgb=height_to_normal(brk_h, 4.6),
         metallic=0.0,
     )
 
-    # 3. Interior Tactical Plaster (muted olive-grey painted drywall/plaster)
-    pls_n = fbm_tileable(res, 8, 4, seed=303)
+    # 3. Interior Tactical Plaster (painted concrete block / troweled plaster with subtle wainscoting grime)
+    pls_n = fbm_tileable(res, 10, 5, seed=303)
+    trowel = fbm_tileable(res, 36, 3, seed=304)
+    pls_h = pls_n * 0.65 + trowel * 0.35
     pls_col = np.stack([
-        0.54 + 0.08 * pls_n,
-        0.55 + 0.08 * pls_n,
-        0.50 + 0.07 * pls_n,
+        0.53 + 0.09 * pls_h,
+        0.54 + 0.09 * pls_h,
+        0.49 + 0.08 * pls_h,
     ], axis=-1)
     mats["plaster_int"] = build_gltf_material(
         "MAT_Plaster_Interior",
         np.clip(pls_col, 0, 1),
-        roughness_map=0.72 + 0.12 * (1.0 - pls_n),
-        normal_rgb=height_to_normal(pls_n, 1.0),
+        roughness_map=0.70 + 0.15 * (1.0 - pls_h),
+        normal_rgb=height_to_normal(pls_h, 1.6),
         metallic=0.0,
     )
 
-    # 4. Dark Structural / Gunmetal Steel (frames, I-beams, hinges)
-    stl_n = fbm_tileable(res, 10, 4, seed=404)
-    scratches = fbm_tileable(res, 32, 2, seed=405)
+    # 4. Dark Structural / Gunmetal Steel (rolled mill scale + edge wear scratches)
+    stl_n = fbm_tileable(res, 12, 5, seed=404)
+    scratches = fbm_tileable(res, 48, 3, seed=405)
+    chip = (scratches > 0.76).astype(np.float32) * 0.10
     stl_col = np.stack([
-        0.16 + 0.07 * stl_n + 0.04 * scratches,
-        0.17 + 0.07 * stl_n + 0.04 * scratches,
-        0.18 + 0.08 * stl_n + 0.04 * scratches,
+        0.15 + 0.07 * stl_n + 0.04 * scratches + chip,
+        0.16 + 0.07 * stl_n + 0.04 * scratches + chip,
+        0.17 + 0.08 * stl_n + 0.04 * scratches + chip,
     ], axis=-1)
     mats["steel_dark"] = build_gltf_material(
         "MAT_Steel_Dark",
         np.clip(stl_col, 0, 1),
-        roughness_map=0.38 + 0.22 * (1.0 - stl_n),
-        normal_rgb=height_to_normal(stl_n * 0.6 + scratches * 0.4, 1.2),
-        metallic=0.85,
+        roughness_map=0.34 + 0.24 * (1.0 - stl_n) - 0.12 * chip,
+        normal_rgb=height_to_normal(stl_n * 0.55 + scratches * 0.45, 1.7),
+        metallic=0.86,
     )
 
     # 5. Rusted Rebar Steel
-    rst_n = fbm_tileable(res, 14, 4, seed=505)
-    ribs = 0.5 + 0.5 * np.sin(y_coord * 2.0 * np.pi * 24.0)
+    rst_n = fbm_tileable(res, 16, 4, seed=505)
+    ribs = 0.5 + 0.5 * np.sin(y_coord * 2.0 * np.pi * 32.0)
     rst_col = np.stack([
-        0.34 + 0.18 * rst_n,
+        0.35 + 0.19 * rst_n,
         0.18 + 0.09 * rst_n,
-        0.11 + 0.06 * rst_n,
+        0.10 + 0.06 * rst_n,
     ], axis=-1)
     mats["rebar_rust"] = build_gltf_material(
         "MAT_Rebar_Rusted",
         np.clip(rst_col, 0, 1),
-        roughness_map=0.68 + 0.20 * rst_n,
-        normal_rgb=height_to_normal(ribs * 0.7 + rst_n * 0.3, 3.0),
+        roughness_map=0.66 + 0.22 * rst_n,
+        normal_rgb=height_to_normal(ribs * 0.72 + rst_n * 0.28, 3.6),
         metallic=0.65,
     )
 

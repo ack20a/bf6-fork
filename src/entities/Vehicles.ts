@@ -71,6 +71,8 @@ export class CombatVehicle implements DamageableActor {
   private sockPodR?: THREE.Object3D;
   private sockHmgMuzzle?: THREE.Object3D;
 
+  private shadowMeshes: THREE.Mesh[] = [];
+  private shadowLodActive = true;
   private stickyCol: ColliderBox;
 
   constructor(
@@ -113,8 +115,11 @@ export class CombatVehicle implements DamageableActor {
     this.root.rotation.y = this.yaw;
     this.scene.add(this.root);
 
-    // Cache articulated parts & muzzle sockets
+    // Cache articulated parts, shadow-casting meshes & muzzle sockets
     this.root.traverse((o) => {
+      if ((o as THREE.Mesh).isMesh && (o as THREE.Mesh).castShadow) {
+        this.shadowMeshes.push(o as THREE.Mesh);
+      }
       if (o.name.includes("VEH_MBT_Hull") || o.name.includes("VEH_Heli_Fuselage") || o.name.includes("VEH_LATV4_Chassis")) {
         this.hullMesh = o;
       }
@@ -269,6 +274,19 @@ export class CombatVehicle implements DamageableActor {
       if (this.hydraReloadTimer <= 0) this.hydraPodAmmo = 8;
     }
 
+    // Distance-based Shadow & Matrix LOD (hysteresis at 90m..98m so shadows stay crisp near player & free GPU far away)
+    const distSq = playerPosForAI ? this.root.position.distanceToSquared(playerPosForAI) : 0;
+    const wantShadows = this.driverId === "PLAYER" || distSq < 90 * 90;
+    const dropShadows = this.driverId !== "PLAYER" && distSq > 98 * 98;
+    if (wantShadows && !this.shadowLodActive) {
+      this.shadowLodActive = true;
+      for (let i = 0; i < this.shadowMeshes.length; i++) this.shadowMeshes[i].castShadow = true;
+    } else if (dropShadows && this.shadowLodActive) {
+      this.shadowLodActive = false;
+      for (let i = 0; i < this.shadowMeshes.length; i++) this.shadowMeshes[i].castShadow = false;
+    }
+
+    let needsWorldSync = true;
     if (this.driverId === "PLAYER" && input) {
       if (this.kind === "heli") {
         this.updateHeliFlight(dt, input);
@@ -289,19 +307,30 @@ export class CombatVehicle implements DamageableActor {
         this.pitch = THREE.MathUtils.lerp(this.pitch, 0, dt * 3);
         this.roll = THREE.MathUtils.lerp(this.roll, 0, dt * 3);
         this.root.rotation.set(this.pitch, this.yaw, this.roll);
-        if (this.rotorMain) this.rotorMain.rotation.y += 4.5 * dt;
-        if (this.rotorTail) this.rotorTail.rotation.x += 6.0 * dt;
+        if (distSq < 190 * 190) {
+          if (this.rotorMain) this.rotorMain.rotation.y += 4.5 * dt;
+          if (this.rotorTail) this.rotorTail.rotation.x += 6.0 * dt;
+        } else {
+          needsWorldSync = false;
+        }
       } else {
-        this.velocity.multiplyScalar(Math.max(0, 1 - dt * 4));
-        if (this.team === "PAX" && this.kind === "mbt" && playerPosForAI) {
+        const wasMoving = this.velocity.lengthSq() > 0.0004;
+        if (wasMoving) {
+          this.velocity.multiplyScalar(Math.max(0, 1 - dt * 4));
+        }
+        if (this.team === "PAX" && this.kind === "mbt" && playerPosForAI && distSq < 92 * 92) {
           this.updateEnemyTankAI(dt, playerPosForAI);
+        } else if (!wasMoving && distSq > 110 * 110) {
+          needsWorldSync = false;
         }
       }
     }
 
     this.speedKmh = Math.round(this.velocity.length() * 3.6);
-    this.root.updateMatrixWorld(true);
-    this.updateStickyCollider();
+    if (needsWorldSync) {
+      this.root.updateMatrixWorld(true);
+      this.updateStickyCollider();
+    }
   }
 
   private updateGroundDrive(dt: number, input: VehicleInputState): void {

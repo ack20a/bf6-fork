@@ -79,10 +79,14 @@ export class AssetLibrary {
     color: 0xff2a1a,
   });
 
-  public async loadAll(onProgress?: (loaded: number, total: number, key: string) => void): Promise<void> {
+  public async loadAll(
+    onProgress?: (loaded: number, total: number, key: string) => void,
+    maxAnisotropy = 8
+  ): Promise<void> {
     const entries = Object.entries(ASSET_MANIFEST);
     let done = 0;
     const total = entries.length;
+    const aniso = Math.max(1, maxAnisotropy);
 
     await Promise.all(
       entries.map(async ([key, url]) => {
@@ -97,11 +101,20 @@ export class AssetLibrary {
           key === "COV_Czech_Hedgehog" ||
           key === "BLD_Foundation_4x4";
 
+        const tuneTexture = (tex: THREE.Texture | null | undefined) => {
+          if (!tex) return;
+          tex.anisotropy = aniso;
+          tex.minFilter = THREE.LinearMipmapLinearFilter;
+          tex.magFilter = THREE.LinearFilter;
+          tex.needsUpdate = true;
+        };
+
         gltf.scene.traverse((obj) => {
           if (!(obj as THREE.Mesh).isMesh) return;
           const mesh = obj as THREE.Mesh;
 
-          // 1. Fix opaque MAT_Optic_ArmoredGlass on holographic sights, magazines & vehicle windshields!
+          // 1. Fix opaque MAT_Optic_ArmoredGlass on holographic sights, magazines & vehicle windshields,
+          //    and enable high-anisotropy trilinear mipmapping + crisp normal/IBL response across all PBR maps!
           const remapMat = (m: THREE.Material): THREE.Material => {
             if (m.name.includes("Optic_ArmoredGlass")) {
               if (isWeapon) {
@@ -119,6 +132,30 @@ export class AssetLibrary {
             }
             if (isWeapon && m.name.includes("LED_Red") && mesh.name.includes("Optic")) {
               return this.weaponReticleRedMat;
+            }
+
+            const std = m as THREE.MeshStandardMaterial;
+            if (std.isMeshStandardMaterial) {
+              tuneTexture(std.map);
+              tuneTexture(std.normalMap);
+              tuneTexture(std.roughnessMap);
+              tuneTexture(std.metalnessMap);
+              tuneTexture(std.emissiveMap);
+              tuneTexture(std.aoMap);
+
+              if (isWeapon || isFpsArms) {
+                std.envMapIntensity = 1.32;
+                if (std.normalMap) std.normalScale.set(1.22, 1.22);
+              } else if (isVehicle) {
+                std.envMapIntensity = 1.2;
+                if (std.normalMap) std.normalScale.set(1.15, 1.15);
+              } else if (isSoldier) {
+                std.envMapIntensity = 1.12;
+                if (std.normalMap) std.normalScale.set(1.15, 1.15);
+              } else {
+                std.envMapIntensity = 1.08;
+                if (std.normalMap) std.normalScale.set(1.18, 1.18);
+              }
             }
             return m;
           };

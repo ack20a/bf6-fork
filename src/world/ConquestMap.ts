@@ -54,6 +54,8 @@ export class ConquestMap {
   public ticketsPAX = 500;
   private bleedTimer = 0;
   private batchBuckets = new Map<string, BatchBucket>();
+  private rooftopHvacCoords: Array<{ x: number; y: number; z: number; rot: number }> = [];
+  private rooftopMastCoords: Array<{ x: number; y: number; z: number; h: number }> = [];
 
   private bannerMatNATO = new THREE.MeshStandardMaterial({
     color: 0x00d8ff,
@@ -227,6 +229,53 @@ export class ConquestMap {
       this.scene.add(inst);
     }
     this.batchBuckets.clear();
+
+    // Emit GPU-batched Rooftop HVAC Condensers & Tactical Comms Antennas (only 2 draw calls across entire city!)
+    const dummy = new THREE.Object3D();
+    if (this.rooftopHvacCoords.length > 0) {
+      const hvacGeo = new THREE.BoxGeometry(1.45, 0.95, 1.05);
+      hvacGeo.translate(0, 0.475, 0);
+      const hvacMat = new THREE.MeshStandardMaterial({
+        color: 0x9b988e,
+        roughness: 0.62,
+        metalness: 0.38,
+      });
+      const hvacInst = new THREE.InstancedMesh(hvacGeo, hvacMat, this.rooftopHvacCoords.length);
+      hvacInst.castShadow = true;
+      hvacInst.receiveShadow = true;
+      this.rooftopHvacCoords.forEach((h, i) => {
+        dummy.position.set(h.x, h.y, h.z);
+        dummy.rotation.set(0, h.rot, 0);
+        dummy.scale.setScalar(1);
+        dummy.updateMatrix();
+        hvacInst.setMatrixAt(i, dummy.matrix);
+      });
+      hvacInst.computeBoundingSphere();
+      hvacInst.matrixAutoUpdate = false;
+      this.scene.add(hvacInst);
+    }
+
+    if (this.rooftopMastCoords.length > 0) {
+      const mastGeo = new THREE.CylinderGeometry(0.03, 0.065, 1.0, 8);
+      mastGeo.translate(0, 0.5, 0);
+      const mastMat = new THREE.MeshStandardMaterial({
+        color: 0x3b4046,
+        roughness: 0.52,
+        metalness: 0.65,
+      });
+      const mastInst = new THREE.InstancedMesh(mastGeo, mastMat, this.rooftopMastCoords.length);
+      mastInst.castShadow = false;
+      this.rooftopMastCoords.forEach((m, i) => {
+        dummy.position.set(m.x, m.y, m.z);
+        dummy.rotation.set(0, 0, 0);
+        dummy.scale.set(1, m.h, 1);
+        dummy.updateMatrix();
+        mastInst.setMatrixAt(i, dummy.matrix);
+      });
+      mastInst.computeBoundingSphere();
+      mastInst.matrixAutoUpdate = false;
+      this.scene.add(mastInst);
+    }
   }
 
   private buildOpenVehicleHangar(cx: number, cz: number): void {
@@ -246,6 +295,8 @@ export class ConquestMap {
     this.placeEnv("BLD_Roof_Parapet_4m", cx + 2, 3.6, cz + 4, 0);
     this.placeEnv("BLD_Roof_Parapet_4m", cx - 2, 3.6, cz - 4, 180);
     this.placeEnv("BLD_Roof_Parapet_4m", cx + 2, 3.6, cz - 4, 180);
+    this.rooftopHvacCoords.push({ x: cx - 2.2, y: 3.75, z: cz, rot: 0 });
+    this.rooftopMastCoords.push({ x: cx + 3.4, y: 3.75, z: cz + 3.4, h: 4.2 });
   }
 
   private buildTwoStoryCommandBuilding(cx: number, cz: number): void {
@@ -307,6 +358,12 @@ export class ConquestMap {
     this.placeEnv("BLD_Roof_Parapet_4m", cx + 2, 7.2, cz + 4, 0);
     this.placeEnv("BLD_Roof_Parapet_4m", cx + 4, 7.2, cz + 2, 90);
     this.placeEnv("BLD_Roof_Parapet_4m", cx + 4, 7.2, cz - 2, 90);
+
+    // Rooftop HVAC condenser + tall tactical VHF comms antenna silhouette
+    this.rooftopHvacCoords.push({ x: cx - 2.3, y: 7.35, z: cz - 2.2, rot: 0.2 });
+    this.rooftopHvacCoords.push({ x: cx + 1.8, y: 7.35, z: cz - 2.5, rot: 1.57 });
+    this.rooftopMastCoords.push({ x: cx - 3.6, y: 7.35, z: cz - 3.6, h: 5.4 });
+    this.rooftopMastCoords.push({ x: cx + 3.5, y: 7.35, z: cz + 3.5, h: 3.6 });
   }
 
   private buildSingleStoryBunker(cx: number, cz: number): void {
@@ -328,6 +385,8 @@ export class ConquestMap {
     this.placeEnv("BLD_Wall_Solid_4m", cx - 4, 0, cz, -90);
     this.placeEnv("BLD_Roof_Parapet_4m", cx - 2, 3.6, cz + 2, 0);
     this.placeEnv("BLD_Roof_Parapet_4m", cx + 2, 3.6, cz + 2, 0);
+    this.rooftopHvacCoords.push({ x: cx + 2.1, y: 3.75, z: cz - 0.6, rot: 0 });
+    this.rooftopMastCoords.push({ x: cx - 3.5, y: 3.75, z: cz - 1.5, h: 3.8 });
   }
 
   private placeEnv(
