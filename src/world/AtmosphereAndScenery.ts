@@ -367,9 +367,10 @@ export class AtmosphereAndScenery {
 
     const palmTrunks = new THREE.InstancedMesh(trunkGeo, trunkMat, palmCoords.length);
     const palmCrowns = new THREE.InstancedMesh(crownGeo, crownMat, palmCoords.length);
-    palmTrunks.castShadow = true;
-    palmTrunks.receiveShadow = true;
+    palmTrunks.castShadow = false;
+    palmTrunks.receiveShadow = false;
     palmCrowns.castShadow = true;
+    palmCrowns.receiveShadow = false;
 
     const dummy = new THREE.Object3D();
     palmCoords.forEach((p, idx) => {
@@ -380,11 +381,14 @@ export class AtmosphereAndScenery {
       palmTrunks.setMatrixAt(idx, dummy.matrix);
       palmCrowns.setMatrixAt(idx, dummy.matrix);
 
-      // Thin trunk collider on close-in trees so tanks/soldiers don't walk straight through thick trunks
       this.physics.addManualBox(
         new THREE.Box3(new THREE.Vector3(p.x - 0.28, 0, p.z - 0.28), new THREE.Vector3(p.x + 0.28, 5.5 * p.s, p.z + 0.28))
       );
     });
+    palmTrunks.computeBoundingSphere();
+    palmCrowns.computeBoundingSphere();
+    palmTrunks.matrixAutoUpdate = false;
+    palmCrowns.matrixAutoUpdate = false;
     this.scene.add(palmTrunks);
     this.scene.add(palmCrowns);
 
@@ -414,8 +418,8 @@ export class AtmosphereAndScenery {
     }
 
     const bushes = new THREE.InstancedMesh(bushGeo, bushMat, bushCoords.length);
-    bushes.castShadow = true;
-    bushes.receiveShadow = true;
+    bushes.castShadow = false;
+    bushes.receiveShadow = false;
     const col = new THREE.Color();
     bushCoords.forEach((b, idx) => {
       dummy.position.set(b.x, 0, b.z);
@@ -427,6 +431,8 @@ export class AtmosphereAndScenery {
       bushes.setColorAt(idx, col);
     });
     if (bushes.instanceColor) bushes.instanceColor.needsUpdate = true;
+    bushes.computeBoundingSphere();
+    bushes.matrixAutoUpdate = false;
     this.scene.add(bushes);
 
     // --- C. WEATHERED SANDSTONE ROCK OUTCROPS & TACTICAL BOULDERS (115 instances, 1 draw call!) ---
@@ -466,7 +472,7 @@ export class AtmosphereAndScenery {
 
     const rocks = new THREE.InstancedMesh(rockGeo, rockMat, rockCoords.length);
     rocks.castShadow = true;
-    rocks.receiveShadow = true;
+    rocks.receiveShadow = false;
     rockCoords.forEach((r, idx) => {
       dummy.position.set(r.x, 0, r.z);
       dummy.rotation.set(0, r.rot, 0);
@@ -474,7 +480,6 @@ export class AtmosphereAndScenery {
       dummy.updateMatrix();
       rocks.setMatrixAt(idx, dummy.matrix);
 
-      // Solid cover collider for sniper/infantry firefights!
       const rx = 1.05 * r.sx;
       const rz = 1.05 * r.sz;
       const ry = 1.25 * r.sy;
@@ -482,6 +487,8 @@ export class AtmosphereAndScenery {
         new THREE.Box3(new THREE.Vector3(r.x - rx, 0, r.z - rz), new THREE.Vector3(r.x + rx, ry, r.z + rz))
       );
     });
+    rocks.computeBoundingSphere();
+    rocks.matrixAutoUpdate = false;
     this.scene.add(rocks);
   }
 

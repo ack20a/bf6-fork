@@ -28,10 +28,12 @@ async function bootstrap(): Promise<void> {
   // 1. Renderer, Physical Sky, HDR PMREM Environment IBL & Golden-Hour Directional Sun
   const isCoarseMobile = window.matchMedia?.("(pointer: coarse)").matches || window.innerWidth <= 860;
   const renderer = new THREE.WebGLRenderer({ antialias: !isCoarseMobile, powerPreference: "high-performance" });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, isCoarseMobile ? 1.5 : 2));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, isCoarseMobile ? 1.25 : 1.5));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
+  renderer.shadowMap.autoUpdate = false;
+  renderer.shadowMap.needsUpdate = true;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.22;
   container.appendChild(renderer.domElement);
@@ -61,12 +63,12 @@ async function bootstrap(): Promise<void> {
   sunLight.shadow.mapSize.set(shadowRes, shadowRes);
   sunLight.shadow.camera.near = 8;
   sunLight.shadow.camera.far = 230;
-  const shadowExtent = 68;
+  const shadowExtent = 52;
   sunLight.shadow.camera.left = -shadowExtent;
   sunLight.shadow.camera.right = shadowExtent;
   sunLight.shadow.camera.top = shadowExtent;
   sunLight.shadow.camera.bottom = -shadowExtent;
-  sunLight.shadow.bias = -0.00045;
+  sunLight.shadow.bias = -0.0005;
   scene.add(sunLight);
   scene.add(sunLight.target);
 
@@ -162,14 +164,18 @@ async function bootstrap(): Promise<void> {
     hud.pushScoreEvent("侧翼部署：Charlie 绿洲荒漠小镇（身旁已备好 LATV4 机动突击车）", 50);
   });
 
-  // 4. Main Simulation Loop
+  // 4. Main Simulation Loop (Zero-Allocation Unit Roster & Stabilized Shadow Cascade)
   let prevTime = performance.now();
+  let frameTick = 0;
   const sunDir: THREE.Vector3 = (sunLight.userData.sunDir as THREE.Vector3) ?? new THREE.Vector3(0.45, 0.65, 0.55);
+  const unitsBuf: Array<{ pos: THREE.Vector3; team: "NATO" | "PAX" | "NEUTRAL"; isPlayer?: boolean }> = [];
+  const playerUnitEntry = { pos: new THREE.Vector3(), team: "NATO" as const, isPlayer: true };
 
   function animate(now: number): void {
     requestAnimationFrame(animate);
     const dt = Math.min(0.05, Math.max(0.001, (now - prevTime) * 0.001));
     prevTime = now;
+    frameTick++;
 
     const focusPos = player.deployed ? player.getPosition() : camera.position;
     const vehInput = player.buildVehicleInput();
@@ -178,22 +184,28 @@ async function bootstrap(): Promise<void> {
     physics.update(dt);
     scenery.update(dt, focusPos);
 
+    unitsBuf.length = 0;
+    for (let i = 0; i < ai.soldiers.length; i++) {
+      const s = ai.soldiers[i];
+      if (s.isAlive()) {
+        unitsBuf.push({ pos: s.position, team: s.team });
+      }
+    }
+
     if (player.deployed) {
       player.update(dt);
 
       const pPos = player.getPosition();
-      sunLight.position.copy(pPos).addScaledVector(sunDir, 95);
-      sunLight.target.position.set(pPos.x, 0, pPos.z);
+      // Snap sun shadow frustum in 4m increments to eliminate shadow-edge shimmer & redundant shadow updates
+      const snapX = Math.round(pPos.x / 4) * 4;
+      const snapZ = Math.round(pPos.z / 4) * 4;
+      sunLight.position.set(snapX + sunDir.x * 95, sunDir.y * 95, snapZ + sunDir.z * 95);
+      sunLight.target.position.set(snapX, 0, snapZ);
 
-      const units: Array<{ pos: THREE.Vector3; team: "NATO" | "PAX" | "NEUTRAL"; isPlayer?: boolean }> = [
-        { pos: pPos, team: "NATO", isPlayer: true },
-      ];
-      for (const s of ai.soldiers) {
-        if (s.isAlive()) {
-          units.push({ pos: s.position, team: s.team });
-        }
-      }
-      const activeFlag = map.update(dt, units, (fl) => {
+      playerUnitEntry.pos.copy(pPos);
+      unitsBuf.push(playerUnitEntry);
+
+      const activeFlag = map.update(dt, unitsBuf, (fl) => {
         hud.pushScoreEvent(`成功占领征服据点 [${fl.name}]`, 300);
       });
       hud.update(dt, player, map, ai, vehicles, activeFlag);
@@ -204,10 +216,12 @@ async function bootstrap(): Promise<void> {
       sunLight.position.set(sunDir.x * 95, sunDir.y * 95, sunDir.z * 95);
       sunLight.target.position.set(0, 0, 0);
 
-      const units = ai.soldiers.filter((s) => s.isAlive()).map((s) => ({ pos: s.position, team: s.team }));
-      map.update(dt, units);
+      map.update(dt, unitsBuf);
     }
 
+    if (frameTick % 2 === 0) {
+      renderer.shadowMap.needsUpdate = true;
+    }
     renderer.render(scene, camera);
   }
 

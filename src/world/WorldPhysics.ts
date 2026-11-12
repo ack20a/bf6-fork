@@ -1,6 +1,6 @@
 /**
- * Battlefield Tactical Physics, Ballistics, Per-Chunk Wall Destruction,
- * Sticky C4 Charges, Tumbling Debris & Volumetric Blast VFX Engine.
+ * Battlefield Tactical Physics, Converged Ballistics, Per-Chunk Wall Destruction,
+ * Sticky C4 Charges, Tumbling Debris & Zero-Allocation Volumetric Blast VFX Engine.
  */
 
 import * as THREE from "three";
@@ -54,9 +54,11 @@ interface DebrisPiece {
 interface SmokeParticle {
   mesh: THREE.Mesh;
   vel: THREE.Vector3;
+  baseScale: number;
   scaleRate: number;
   life: number;
   maxLife: number;
+  shrinkAtEnd: boolean;
 }
 
 export interface PlantedC4 {
@@ -78,21 +80,43 @@ export class WorldPhysics {
   private queryStamp = 1;
   private seenStamp = new Map<number, number>();
   private queryBuf: ColliderBox[] = [];
+  private rayQueryBuf: ColliderBox[] = [];
+
   private projectiles: FlyingProjectile[] = [];
   private debris: DebrisPiece[] = [];
   private particles: SmokeParticle[] = [];
   private rubblePositions: THREE.Vector2[] = [];
   private cameraShake = 0;
 
-  // Shared lightweight geometries & materials for tracers, debris & blast VFX
-  private tracerGeo = new THREE.BoxGeometry(0.035, 0.035, 1.35);
-  private matTracerNato = new THREE.MeshBasicMaterial({ color: 0x55f6ff });
-  private matTracerPax = new THREE.MeshBasicMaterial({ color: 0xff6633 });
+  // Shared lightweight geometries & pooled materials (zero shader/GC churn!)
+  private tracerGeo: THREE.BoxGeometry;
+  private matTracerNato = new THREE.MeshBasicMaterial({ color: 0x6bf8ff });
+  private matTracerPax = new THREE.MeshBasicMaterial({ color: 0xff6833 });
   private matShellGlow = new THREE.MeshBasicMaterial({ color: 0xffbb44 });
-  private shellGeo = new THREE.SphereGeometry(0.11, 8, 8);
+  private matBlastFlash = new THREE.MeshBasicMaterial({ color: 0xffaa33, transparent: true, opacity: 0.9 });
+  private matImpactSpark = new THREE.MeshBasicMaterial({ color: 0xffe082 });
+  private matRocketTrail = new THREE.MeshBasicMaterial({ color: 0xa8a49c, transparent: true, opacity: 0.42, depthWrite: false });
+  private matBlastSmokes = [
+    new THREE.MeshBasicMaterial({ color: 0x282828, transparent: true, opacity: 0.65, depthWrite: false }),
+    new THREE.MeshBasicMaterial({ color: 0x383634, transparent: true, opacity: 0.6, depthWrite: false }),
+    new THREE.MeshBasicMaterial({ color: 0x4a4640, transparent: true, opacity: 0.55, depthWrite: false }),
+  ];
+  private shellGeo = new THREE.SphereGeometry(0.1, 6, 6);
   private debrisGeo = new THREE.DodecahedronGeometry(0.19, 0);
   private debrisMat = new THREE.MeshStandardMaterial({ color: 0x5a5854, roughness: 0.92 });
-  private smokeGeo = new THREE.SphereGeometry(0.45, 8, 8);
+  private smokeGeo = new THREE.SphereGeometry(0.45, 7, 6);
+
+  // Pre-allocated scratch math objects for zero-GC hot loops
+  private readonly _nextPos = new THREE.Vector3();
+  private readonly _segDir = new THREE.Vector3();
+  private readonly _hitPt = new THREE.Vector3();
+  private readonly _bestHitPt = new THREE.Vector3();
+  private readonly _lookTarget = new THREE.Vector3();
+  private readonly _actorBox = new THREE.Box3();
+  private readonly _ray = new THREE.Ray();
+  private readonly _aimRay = new THREE.Ray();
+  private readonly _aimHit = new THREE.Vector3();
+  private readonly _aimBox = new THREE.Box3();
 
   public onPlayerHitConfirm?: (isKill: boolean, victimName: string, weaponName: string, isHeadshot: boolean) => void;
   public onPlayerScoreEvent?: (label: string, points: number) => void;
@@ -101,7 +125,11 @@ export class WorldPhysics {
     private scene: THREE.Scene,
     private assets: AssetLibrary,
     private sfx: SoundFX
-  ) {}
+  ) {
+    // Translate tracer geometry +Z by half its length so tail starts cleanly at gun muzzle (never behind camera!)
+    this.tracerGeo = new THREE.BoxGeometry(0.02, 0.02, 0.9);
+    this.tracerGeo.translate(0, 0, 0.45);
+  }
 
   public consumeCameraShake(dt: number): number {
     const s = this.cameraShake;
@@ -117,17 +145,18 @@ export class WorldPhysics {
    * Traverse an instantiated prefab hierarchy and register accurate world-space Box3 colliders
    * for every intact structural mesh and destructible Voronoi wall chunk.
    */
-  public registerPrefabHierarchy(root: THREE.Object3D, skipColliderNames: string[] = []): void {
+  public registerPrefabHierarchy(
+    root: THREE.Object3D,
+    skipColliderNames: string[] = [],
+    keepMeshRef = true
+  ): void {
     root.updateMatrixWorld(true);
     root.traverse((obj) => {
       if (!(obj as THREE.Mesh).isMesh) return;
       if (!obj.visible) return;
       if (skipColliderNames.some((s) => obj.name.includes(s))) return;
-
-      // Skip soft Conquest flag banner
       if (obj.name.includes("Banner")) return;
 
-      // Special staircase handling: register 14 stepped walk-up boxes instead of one giant AABB!
       if (obj.name.includes("BLD_Stairs_4m")) {
         this.registerStairSteps(root);
         return;
@@ -151,7 +180,7 @@ export class WorldPhysics {
       const col: ColliderBox = {
         id: this.nextColliderId++,
         box,
-        mesh: obj,
+        mesh: keepMeshRef ? obj : undefined,
         destructible: isDestructible,
         hp,
         maxHp: hp,
@@ -186,8 +215,7 @@ export class WorldPhysics {
     this.dynamicColliders.push(col);
   }
 
-  public queryNearbyColliders(minX: number, minZ: number, maxX: number, maxZ: number): ColliderBox[] {
-    const out = this.queryBuf;
+  public queryNearbyColliders(minX: number, minZ: number, maxX: number, maxZ: number, out = this.queryBuf): ColliderBox[] {
     out.length = 0;
     const stamp = ++this.queryStamp;
     const cs = this.cellSize;
@@ -217,6 +245,105 @@ export class WorldPhysics {
     return out;
   }
 
+  /**
+   * Fast center-screen camera raycast so bullets spawned at the 3D weapon muzzle
+   * converge accurately onto the exact point under the player's crosshair!
+   */
+  public raycastAimTarget(
+    origin: THREE.Vector3,
+    dir: THREE.Vector3,
+    maxDist: number,
+    ignoreId: string,
+    ignoreTeam: Team,
+    outTarget: THREE.Vector3
+  ): THREE.Vector3 {
+    this._aimRay.set(origin, dir);
+    let bestDist = maxDist;
+
+    // 1. Ground plane intersection (Y = 0)
+    if (dir.y < -1e-4 && origin.y > 0.02) {
+      const dGnd = -origin.y / dir.y;
+      if (dGnd > 0.2 && dGnd < bestDist) {
+        bestDist = dGnd;
+      }
+    }
+
+    // 2. Step along ray in 28m segments through spatial hash grid (stops immediately on first hit segment)
+    const stepLen = 28;
+    for (let t0 = 0; t0 < bestDist; t0 += stepLen) {
+      const t1 = Math.min(bestDist, t0 + stepLen);
+      const ax = origin.x + dir.x * t0;
+      const az = origin.z + dir.z * t0;
+      const bx = origin.x + dir.x * t1;
+      const bz = origin.z + dir.z * t1;
+      const cols = this.queryNearbyColliders(
+        Math.min(ax, bx) - 0.5,
+        Math.min(az, bz) - 0.5,
+        Math.max(ax, bx) + 0.5,
+        Math.max(az, bz) + 0.5,
+        this.rayQueryBuf
+      );
+      for (let i = 0; i < cols.length; i++) {
+        const c = cols[i];
+        if (c.destroyed) continue;
+        if (this._aimRay.intersectBox(c.box, this._aimHit)) {
+          const d = origin.distanceTo(this._aimHit);
+          if (d > 0.15 && d < bestDist) {
+            bestDist = d;
+          }
+        }
+      }
+      if (bestDist <= t1) break;
+    }
+
+    // 3. Check live enemy actors so crosshair aim onto soldiers/vehicles converges tightly
+    for (let i = 0; i < this.actors.length; i++) {
+      const actor = this.actors[i];
+      if (!actor.isAlive() || actor.id === ignoreId || actor.team === ignoreTeam) continue;
+      const aPos = actor.getPosition();
+      const aRad = actor.getHitRadius();
+      const aH = actor.getHeight();
+      this._aimBox.min.set(aPos.x - aRad, aPos.y, aPos.z - aRad);
+      this._aimBox.max.set(aPos.x + aRad, aPos.y + aH, aPos.z + aRad);
+      if (this._aimRay.intersectBox(this._aimBox, this._aimHit)) {
+        const d = origin.distanceTo(this._aimHit);
+        if (d > 0.15 && d < bestDist) {
+          bestDist = d;
+        }
+      }
+    }
+
+    return outTarget.copy(origin).addScaledVector(dir, bestDist);
+  }
+
+  /**
+   * Prevent muzzle clipping through thin walls when player stands pressed right against cover.
+   */
+  public isSegmentBlocked(from: THREE.Vector3, to: THREE.Vector3): boolean {
+    this._segDir.copy(to).sub(from);
+    const len = this._segDir.length();
+    if (len < 1e-4) return false;
+    this._segDir.divideScalar(len);
+    this._aimRay.set(from, this._segDir);
+
+    const cols = this.queryNearbyColliders(
+      Math.min(from.x, to.x) - 0.2,
+      Math.min(from.z, to.z) - 0.2,
+      Math.max(from.x, to.x) + 0.2,
+      Math.max(from.z, to.z) + 0.2,
+      this.rayQueryBuf
+    );
+    for (let i = 0; i < cols.length; i++) {
+      const c = cols[i];
+      if (c.destroyed || c.id >= 90000) continue;
+      if (c.box.containsPoint(to)) return true;
+      if (this._aimRay.intersectBox(c.box, this._aimHit)) {
+        if (from.distanceTo(this._aimHit) <= len + 0.05) return true;
+      }
+    }
+    return false;
+  }
+
   private registerStairSteps(stairsRoot: THREE.Object3D): void {
     stairsRoot.updateMatrixWorld(true);
     const nSteps = 14;
@@ -225,8 +352,6 @@ export class WorldPhysics {
     const dx = runTotal / nSteps;
     const dz = riseTotal / nSteps;
 
-    // In Blender: X in [-1.9..+1.9], Z in [0..3.6], Y in [-0.8..+0.8]
-    // After export_yup=True: local X -> X, local Z -> Y (up!), local Y -> -Z
     for (let i = 0; i < nSteps; i++) {
       const lx = -1.9 + (i + 0.5) * dx;
       const ly = (i + 0.5) * dz;
@@ -275,20 +400,17 @@ export class WorldPhysics {
     height = 1.72,
     stepHeight = 0.36
   ): { grounded: boolean } {
-    // 1. Horizontal XZ movement & wall sliding
     pos.x += vel.x * dt;
     this.pushOutHorizontal(pos, radius, height, stepHeight);
 
     pos.z += vel.z * dt;
     this.pushOutHorizontal(pos, radius, height, stepHeight);
 
-    // Keep inside expanded 430m x 430m Conquest Large battlefield boundary
     pos.x = THREE.MathUtils.clamp(pos.x, -215, 215);
     pos.z = THREE.MathUtils.clamp(pos.z, -215, 215);
 
-    // 2. Vertical gravity, floor landing & step-up support
     pos.y += vel.y * dt;
-    let supportY = 0.0; // Base ground plane at Y = 0
+    let supportY = 0.0;
     const near = this.queryNearbyColliders(pos.x - radius, pos.z - radius, pos.x + radius, pos.z + radius);
 
     for (let i = 0; i < near.length; i++) {
@@ -298,11 +420,9 @@ export class WorldPhysics {
       if (pos.x + radius <= b.min.x || pos.x - radius >= b.max.x) continue;
       if (pos.z + radius <= b.min.z || pos.z - radius >= b.max.z) continue;
 
-      // Floor / Stair top support if player feet were above or within stepHeight of b.max.y
       if (b.max.y <= pos.y + stepHeight && b.max.y > supportY) {
         supportY = b.max.y;
       }
-      // Ceiling hit check
       if (vel.y > 0 && pos.y + height > b.min.y && pos.y < b.min.y) {
         pos.y = b.min.y - height;
         vel.y = 0;
@@ -347,7 +467,6 @@ export class WorldPhysics {
           pos.x += (dx / dist) * overlap;
           pos.z += (dz / dist) * overlap;
         } else {
-          // Inside AABB: push out along shallowest axis
           const ox1 = pos.x - b.min.x + radius;
           const ox2 = b.max.x - pos.x + radius;
           const oz1 = pos.z - b.min.z + radius;
@@ -363,7 +482,7 @@ export class WorldPhysics {
   }
 
   /**
-   * Spawn a ballistic bullet/tracer or heavy explosive rocket/shell.
+   * Spawn a ballistic bullet/tracer or heavy explosive rocket/shell from true weapon muzzle.
    */
   public spawnProjectile(opts: {
     kind: "bullet" | "rpg" | "tank_shell" | "hydra";
@@ -383,15 +502,16 @@ export class WorldPhysics {
     if (opts.kind === "bullet") {
       mesh = new THREE.Mesh(this.tracerGeo, opts.team === "NATO" ? this.matTracerNato : this.matTracerPax);
       mesh.position.copy(opts.origin);
-      mesh.lookAt(opts.origin.clone().add(dir));
+      this._lookTarget.copy(opts.origin).add(dir);
+      mesh.lookAt(this._lookTarget);
     } else if (opts.kind === "rpg") {
       mesh = this.assets.cloneStatic("WPN_Launcher_RPG7V2");
-      // Show only warhead or scale compactly for flying rocket
       mesh.traverse((o) => {
         if ((o as THREE.Mesh).isMesh && o.name.includes("Tube")) o.visible = false;
       });
       mesh.position.copy(opts.origin);
-      mesh.lookAt(opts.origin.clone().sub(dir));
+      this._lookTarget.copy(opts.origin).sub(dir);
+      mesh.lookAt(this._lookTarget);
     } else {
       mesh = new THREE.Mesh(this.shellGeo, this.matShellGlow);
       mesh.position.copy(opts.origin);
@@ -405,27 +525,26 @@ export class WorldPhysics {
       weaponName: opts.weaponName,
       pos: opts.origin.clone(),
       vel: dir.multiplyScalar(opts.speed),
-      gravity: opts.gravity ?? (opts.kind === "bullet" ? 2.5 : 4.8),
+      gravity: opts.gravity ?? (opts.kind === "bullet" ? 2.2 : 4.6),
       damage: opts.damage,
       blastRadius: opts.blastRadius ?? 0,
-      life: opts.kind === "bullet" ? 1.6 : 5.0,
+      life: opts.kind === "bullet" ? 1.5 : 4.8,
       mesh,
       smokeTimer: 0,
     });
   }
 
-  /**
-   * Throw and stick a C4 Breach Pack onto world geometry or vehicles!
-   */
   public throwStickyC4(origin: THREE.Vector3, dir: THREE.Vector3): void {
-    const ray = new THREE.Ray(origin, dir.clone().normalize());
+    const normDir = dir.clone().normalize();
+    const ray = new THREE.Ray(origin, normDir);
     let bestDist = 4.2;
-    let hitPoint = origin.clone().addScaledVector(dir, 2.8);
+    const hitPoint = origin.clone().addScaledVector(normDir, 2.8);
     let stuckObj: THREE.Object3D | undefined;
 
-    // Check vehicle / actor hit first ("Jeep / Tank C4!")
+    const near = this.queryNearbyColliders(origin.x - 4.5, origin.z - 4.5, origin.x + 4.5, origin.z + 4.5);
     const vTmp = new THREE.Vector3();
-    for (const c of this.colliders) {
+    for (let i = 0; i < near.length; i++) {
+      const c = near[i];
       if (c.destroyed) continue;
       if (ray.intersectBox(c.box, vTmp)) {
         const d = origin.distanceTo(vTmp);
@@ -475,10 +594,6 @@ export class WorldPhysics {
     return count;
   }
 
-  /**
-   * Trigger a Battlefield radial explosion: shatters Voronoi wall chunks,
-   * spawns flying concrete debris & rubble piles, damages vehicles & infantry!
-   */
   public triggerExplosion(
     center: THREE.Vector3,
     radius: number,
@@ -489,16 +604,21 @@ export class WorldPhysics {
   ): void {
     this.sfx.playExplosion(radius / 4.5);
     this.spawnBlastVFX(center, radius);
-
-    // Camera shake scaled by proximity to active camera
-    this.addCameraShake(Math.min(0.85, (radius * 0.14)));
+    this.addCameraShake(Math.min(0.85, radius * 0.14));
 
     let chunksBreached = 0;
     const chunkCenter = new THREE.Vector3();
 
-    // 1. Damage destructible building wall chunks & cover
-    for (let i = 0; i < this.colliders.length; i++) {
-      const col = this.colliders[i];
+    // Spatial-grid broadphase for blast damage instead of scanning all 2,000+ colliders!
+    const nearCols = this.queryNearbyColliders(
+      center.x - radius - 1,
+      center.z - radius - 1,
+      center.x + radius + 1,
+      center.z + radius + 1,
+      this.rayQueryBuf
+    );
+    for (let i = 0; i < nearCols.length; i++) {
+      const col = nearCols[i];
       if (col.destroyed || !col.destructible) continue;
 
       col.box.clampPoint(center, chunkCenter);
@@ -510,7 +630,7 @@ export class WorldPhysics {
           col.destroyed = true;
           if (col.mesh) col.mesh.visible = false;
           col.box.getCenter(chunkCenter);
-          this.spawnConcreteDebris(chunkCenter, center, 6);
+          this.spawnConcreteDebris(chunkCenter, center, 5);
           this.maybeSpawnGroundRubble(chunkCenter);
           chunksBreached++;
         }
@@ -521,10 +641,11 @@ export class WorldPhysics {
       this.onPlayerScoreEvent?.(`摧毁战术掩体/墙体 x${chunksBreached}`, chunksBreached * 25);
     }
 
-    // 2. Splash damage to Soldiers & Vehicles
-    for (const actor of this.actors) {
+    const aPos = new THREE.Vector3();
+    for (let i = 0; i < this.actors.length; i++) {
+      const actor = this.actors[i];
       if (!actor.isAlive()) continue;
-      const aPos = actor.getPosition().clone();
+      aPos.copy(actor.getPosition());
       aPos.y += actor.getHeight() * 0.5;
       const dist = aPos.distanceTo(center);
       if (dist <= radius + actor.getHitRadius()) {
@@ -555,90 +676,99 @@ export class WorldPhysics {
   }
 
   private spawnConcreteDebris(origin: THREE.Vector3, blastCenter: THREE.Vector3, count: number): void {
+    if (this.debris.length > 48) return; // Cap active debris for locked high FPS
     const outDir = origin.clone().sub(blastCenter);
     if (outDir.lengthSq() < 0.01) outDir.set(0, 1, 0);
     outDir.normalize();
 
     for (let i = 0; i < count; i++) {
       const m = new THREE.Mesh(this.debrisGeo, this.debrisMat);
-      m.castShadow = true;
+      m.castShadow = false;
       m.scale.set(0.6 + Math.random() * 0.9, 0.5 + Math.random() * 0.7, 0.6 + Math.random() * 0.9);
-      m.position.copy(origin).add(
-        new THREE.Vector3((Math.random() - 0.5) * 0.8, (Math.random() - 0.5) * 0.8, (Math.random() - 0.5) * 0.8)
+      m.position.set(
+        origin.x + (Math.random() - 0.5) * 0.8,
+        origin.y + (Math.random() - 0.5) * 0.8,
+        origin.z + (Math.random() - 0.5) * 0.8
       );
       this.scene.add(m);
 
-      const vel = outDir
-        .clone()
-        .multiplyScalar(5 + Math.random() * 9)
-        .add(new THREE.Vector3((Math.random() - 0.5) * 7, 3 + Math.random() * 6, (Math.random() - 0.5) * 7));
+      const spd = 5 + Math.random() * 9;
+      const vel = new THREE.Vector3(
+        outDir.x * spd + (Math.random() - 0.5) * 7,
+        outDir.y * spd + 3 + Math.random() * 6,
+        outDir.z * spd + (Math.random() - 0.5) * 7
+      );
 
       this.debris.push({
         mesh: m,
         vel,
         angVel: new THREE.Vector3((Math.random() - 0.5) * 12, (Math.random() - 0.5) * 12, (Math.random() - 0.5) * 12),
-        life: 3.2 + Math.random() * 1.5,
+        life: 2.6 + Math.random() * 1.2,
       });
     }
   }
 
   private spawnBlastVFX(center: THREE.Vector3, radius: number): void {
-    // Bright fireball flash + rising dark smoke spheres
-    const flashMat = new THREE.MeshBasicMaterial({ color: 0xffaa33, transparent: true, opacity: 0.95 });
-    const flash = new THREE.Mesh(this.smokeGeo, flashMat);
+    const flash = new THREE.Mesh(this.smokeGeo, this.matBlastFlash);
     flash.position.copy(center);
-    flash.scale.setScalar(radius * 0.45);
+    const fScale = radius * 0.45;
+    flash.scale.setScalar(fScale);
     this.scene.add(flash);
     this.particles.push({
       mesh: flash,
       vel: new THREE.Vector3(0, 1.5, 0),
-      scaleRate: radius * 3.2,
-      life: 0.22,
-      maxLife: 0.22,
+      baseScale: fScale,
+      scaleRate: radius * 3.0,
+      life: 0.2,
+      maxLife: 0.2,
+      shrinkAtEnd: true,
     });
 
-    for (let i = 0; i < 8; i++) {
-      const shade = 0.16 + Math.random() * 0.18;
-      const smMat = new THREE.MeshBasicMaterial({
-        color: new THREE.Color(shade, shade, shade),
-        transparent: true,
-        opacity: 0.75,
-      });
+    for (let i = 0; i < 6; i++) {
+      const smMat = this.matBlastSmokes[i % this.matBlastSmokes.length];
       const sm = new THREE.Mesh(this.smokeGeo, smMat);
-      sm.position.copy(center).add(
-        new THREE.Vector3((Math.random() - 0.5) * radius * 0.5, Math.random() * 0.8, (Math.random() - 0.5) * radius * 0.5)
+      sm.position.set(
+        center.x + (Math.random() - 0.5) * radius * 0.5,
+        center.y + Math.random() * 0.8,
+        center.z + (Math.random() - 0.5) * radius * 0.5
       );
-      sm.scale.setScalar(0.6 + Math.random() * 0.7);
+      const s0 = 0.65 + Math.random() * 0.7;
+      sm.scale.setScalar(s0);
       this.scene.add(sm);
-      const maxL = 1.3 + Math.random() * 0.9;
+      const maxL = 1.2 + Math.random() * 0.8;
       this.particles.push({
         mesh: sm,
-        vel: new THREE.Vector3((Math.random() - 0.5) * 2.5, 2.8 + Math.random() * 3.2, (Math.random() - 0.5) * 2.5),
-        scaleRate: 1.8,
+        vel: new THREE.Vector3((Math.random() - 0.5) * 2.5, 2.8 + Math.random() * 3.0, (Math.random() - 0.5) * 2.5),
+        baseScale: s0,
+        scaleRate: 1.6,
         life: maxL,
         maxLife: maxL,
+        shrinkAtEnd: true,
       });
     }
   }
 
   private spawnImpactSpark(pt: THREE.Vector3): void {
-    const spMat = new THREE.MeshBasicMaterial({ color: 0xffdd77, transparent: true, opacity: 0.9 });
-    const sp = new THREE.Mesh(this.shellGeo, spMat);
+    if (this.particles.length > 90) return;
+    const sp = new THREE.Mesh(this.shellGeo, this.matImpactSpark);
     sp.position.copy(pt);
-    sp.scale.setScalar(0.7);
+    sp.scale.setScalar(0.65);
     this.scene.add(sp);
     this.particles.push({
       mesh: sp,
       vel: new THREE.Vector3(0, 0.8, 0),
-      scaleRate: 2.2,
-      life: 0.12,
-      maxLife: 0.12,
+      baseScale: 0.65,
+      scaleRate: 1.8,
+      life: 0.1,
+      maxLife: 0.1,
+      shrinkAtEnd: true,
     });
   }
 
   public update(dt: number): void {
     // 1. Update Planted Sticky C4s
-    for (const c4 of this.plantedC4s) {
+    for (let i = 0; i < this.plantedC4s.length; i++) {
+      const c4 = this.plantedC4s[i];
       if (c4.stuckTo) {
         if (!c4.stuckTo.visible) {
           c4.stuckTo = undefined;
@@ -652,11 +782,12 @@ export class WorldPhysics {
       }
     }
 
-    // 2. Step Projectiles & Ray-Segment Hit Detection
-    const nextPos = new THREE.Vector3();
-    const segDir = new THREE.Vector3();
-    const hitPt = new THREE.Vector3();
-    const ray = new THREE.Ray();
+    // 2. Step Projectiles & Zero-Allocation Ray-Segment Hit Detection
+    const nextPos = this._nextPos;
+    const segDir = this._segDir;
+    const hitPt = this._hitPt;
+    const hitPosition = this._bestHitPt;
+    const ray = this._ray;
 
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const p = this.projectiles[i];
@@ -680,7 +811,7 @@ export class WorldPhysics {
         let hitKind: "none" | "ground" | "world" | "actor" = "none";
         let hitCollider: ColliderBox | undefined;
         let hitActor: DamageableActor | undefined;
-        let hitPosition = nextPos.clone();
+        hitPosition.copy(nextPos);
 
         // Ground plane check (Y = 0)
         if (nextPos.y <= 0.02 && p.pos.y > 0.02) {
@@ -693,7 +824,7 @@ export class WorldPhysics {
           }
         }
 
-        // World Box3 colliders (Spatial Grid broadphase along projectile segment)
+        // World Box3 colliders (Spatial Grid broadphase)
         const nearCols = this.queryNearbyColliders(
           Math.min(p.pos.x, nextPos.x) - 0.5,
           Math.min(p.pos.z, nextPos.z) - 0.5,
@@ -714,17 +845,16 @@ export class WorldPhysics {
           }
         }
 
-        // Actors (Enemy Soldiers & Vehicles)
-        for (const actor of this.actors) {
+        // Actors (Enemy Soldiers & Vehicles — zero Box3 allocation!)
+        for (let aIdx = 0; aIdx < this.actors.length; aIdx++) {
+          const actor = this.actors[aIdx];
           if (!actor.isAlive() || actor.id === p.ownerId || actor.team === p.team) continue;
           const aPos = actor.getPosition();
           const aRad = actor.getHitRadius();
           const aH = actor.getHeight();
-          const actorBox = new THREE.Box3(
-            new THREE.Vector3(aPos.x - aRad, aPos.y, aPos.z - aRad),
-            new THREE.Vector3(aPos.x + aRad, aPos.y + aH, aPos.z + aRad)
-          );
-          if (ray.intersectBox(actorBox, hitPt)) {
+          this._actorBox.min.set(aPos.x - aRad, aPos.y, aPos.z - aRad);
+          this._actorBox.max.set(aPos.x + aRad, aPos.y + aH, aPos.z + aRad);
+          if (ray.intersectBox(this._actorBox, hitPt)) {
             const d = p.pos.distanceTo(hitPt);
             if (d <= segLen && d < hitDist) {
               hitDist = d;
@@ -737,7 +867,7 @@ export class WorldPhysics {
 
         if (hitKind !== "none") {
           if (p.blastRadius > 0) {
-            this.triggerExplosion(hitPosition, p.blastRadius, p.damage, p.team, p.ownerId, p.weaponName);
+            this.triggerExplosion(hitPosition.clone(), p.blastRadius, p.damage, p.team, p.ownerId, p.weaponName);
           } else {
             this.spawnImpactSpark(hitPosition);
             if (hitKind === "actor" && hitActor) {
@@ -751,7 +881,6 @@ export class WorldPhysics {
                 this.onPlayerHitConfirm?.(killed, hitActor.id, p.weaponName, isHeadshot);
               }
             } else if (hitKind === "world" && hitCollider && hitCollider.destructible) {
-              // Heavy bullets (.50 cal / Sniper) chip away destructible sandbags & window frames!
               hitCollider.hp -= p.damage * 0.22;
               if (hitCollider.hp <= 0) {
                 hitCollider.destroyed = true;
@@ -769,24 +898,28 @@ export class WorldPhysics {
         }
       }
 
-      // Advance rocket/bullet & emit rocket smoke trail
+      // Advance projectile & orient tracer along live velocity curve
       p.pos.copy(nextPos);
       p.mesh.position.copy(p.pos);
-      if (p.kind !== "bullet") {
+      if (p.kind === "bullet") {
+        this._lookTarget.copy(p.pos).add(segDir);
+        p.mesh.lookAt(this._lookTarget);
+      } else {
         p.smokeTimer -= dt;
-        if (p.smokeTimer <= 0) {
-          p.smokeTimer = 0.025;
-          const smMat = new THREE.MeshBasicMaterial({ color: 0x999999, transparent: true, opacity: 0.45 });
-          const sm = new THREE.Mesh(this.smokeGeo, smMat);
+        if (p.smokeTimer <= 0 && this.particles.length < 95) {
+          p.smokeTimer = 0.032;
+          const sm = new THREE.Mesh(this.smokeGeo, this.matRocketTrail);
           sm.position.copy(p.pos);
-          sm.scale.setScalar(0.28);
+          sm.scale.setScalar(0.26);
           this.scene.add(sm);
           this.particles.push({
             mesh: sm,
-            vel: new THREE.Vector3(0, 0.6, 0),
-            scaleRate: 0.9,
-            life: 0.55,
-            maxLife: 0.55,
+            vel: new THREE.Vector3(0, 0.55, 0),
+            baseScale: 0.26,
+            scaleRate: 0.75,
+            life: 0.45,
+            maxLife: 0.45,
+            shrinkAtEnd: true,
           });
         }
       }
@@ -815,20 +948,20 @@ export class WorldPhysics {
       }
     }
 
-    // 4. Step Explosion & Smoke Particles
+    // 4. Step Explosion & Smoke Particles (shared pooled materials — zero .dispose() shader stalls!)
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const pt = this.particles[i];
       pt.life -= dt;
       if (pt.life <= 0) {
         this.scene.remove(pt.mesh);
-        (pt.mesh.material as THREE.Material).dispose();
         this.particles.splice(i, 1);
         continue;
       }
       pt.mesh.position.addScaledVector(pt.vel, dt);
-      pt.mesh.scale.addScalar(pt.scaleRate * dt);
-      const mat = pt.mesh.material as THREE.MeshBasicMaterial;
-      mat.opacity = Math.max(0, (pt.life / pt.maxLife) * 0.8);
+      const t = 1 - pt.life / pt.maxLife;
+      const env = pt.shrinkAtEnd && t > 0.65 ? (1 - t) / 0.35 : 1.0;
+      const curScale = Math.max(0.01, (pt.baseScale + pt.scaleRate * (pt.maxLife - pt.life)) * env);
+      pt.mesh.scale.setScalar(curScale);
     }
   }
 }

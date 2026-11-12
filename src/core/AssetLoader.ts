@@ -1,6 +1,7 @@
 /**
  * Loads and caches all 29 Blender-exported .glb tactical assets.
- * Supports clean static deep-cloning (preserving userData) and SkinnedMesh cloning via SkeletonUtils.
+ * Configures optical sight glass transparency, smart shadow culling,
+ * SkinnedMesh frustum bounding spheres, and clean static/skinned cloning.
  */
 
 import * as THREE from "three";
@@ -52,6 +53,32 @@ export class AssetLibrary {
   private cache = new Map<string, GLTF>();
   private loader = new GLTFLoader();
 
+  // Shared crystal-clear reflex/holo lens & vehicle canopy materials
+  private weaponOpticGlassMat = new THREE.MeshStandardMaterial({
+    name: "MAT_Weapon_ClearOpticGlass",
+    color: 0x9beeff,
+    roughness: 0.05,
+    metalness: 0.04,
+    transparent: true,
+    opacity: 0.05,
+    depthWrite: false,
+  });
+
+  private vehicleCanopyGlassMat = new THREE.MeshStandardMaterial({
+    name: "MAT_Vehicle_ClearCanopy",
+    color: 0x263842,
+    roughness: 0.08,
+    metalness: 0.18,
+    transparent: true,
+    opacity: 0.3,
+    depthWrite: false,
+  });
+
+  private weaponReticleRedMat = new THREE.MeshBasicMaterial({
+    name: "MAT_Weapon_HoloReticleRed",
+    color: 0xff2a1a,
+  });
+
   public async loadAll(onProgress?: (loaded: number, total: number, key: string) => void): Promise<void> {
     const entries = Object.entries(ASSET_MANIFEST);
     let done = 0;
@@ -60,17 +87,79 @@ export class AssetLibrary {
     await Promise.all(
       entries.map(async ([key, url]) => {
         const gltf = await this.loader.loadAsync(url);
+        const isWeapon = key.startsWith("WPN_") || key.startsWith("GAD_");
+        const isVehicle = key.startsWith("VEH_");
+        const isFpsArms = key === "CHR_FPS_Arms_Rig";
+        const isSoldier = key.startsWith("CHR_Soldier_");
+        const isSmallProp =
+          key === "BLD_Rubble_Pile" ||
+          key === "COV_Tactical_Crate" ||
+          key === "COV_Czech_Hedgehog" ||
+          key === "BLD_Foundation_4x4";
+
         gltf.scene.traverse((obj) => {
-          if ((obj as THREE.Mesh).isMesh) {
-            const mesh = obj as THREE.Mesh;
+          if (!(obj as THREE.Mesh).isMesh) return;
+          const mesh = obj as THREE.Mesh;
+
+          // 1. Fix opaque MAT_Optic_ArmoredGlass on holographic sights, magazines & vehicle windshields!
+          const remapMat = (m: THREE.Material): THREE.Material => {
+            if (m.name.includes("Optic_ArmoredGlass")) {
+              if (isWeapon) {
+                // Magazine window stays semi-translucent smoked polymer; sight glass becomes crystal-clear!
+                if (mesh.name.includes("Magazine")) {
+                  const magGlass = this.vehicleCanopyGlassMat.clone();
+                  magGlass.opacity = 0.42;
+                  return magGlass;
+                }
+                return this.weaponOpticGlassMat;
+              }
+              if (isVehicle) {
+                return this.vehicleCanopyGlassMat;
+              }
+            }
+            if (isWeapon && m.name.includes("LED_Red") && mesh.name.includes("Optic")) {
+              return this.weaponReticleRedMat;
+            }
+            return m;
+          };
+
+          if (Array.isArray(mesh.material)) {
+            mesh.material = mesh.material.map(remapMat);
+          } else if (mesh.material) {
+            mesh.material = remapMat(mesh.material);
+          }
+
+          // Render order on optic hood so transparent lens never occludes glowing reticle dot
+          if (isWeapon && mesh.name.includes("Optic")) {
+            mesh.renderOrder = 2;
+          }
+
+          // 2. Smart Shadow & Frustum Culling per asset class for high FPS
+          if (isWeapon || isFpsArms) {
+            mesh.castShadow = false;
+            mesh.receiveShadow = false;
+          } else if (isSmallProp) {
+            mesh.castShadow = false;
+            mesh.receiveShadow = key === "BLD_Foundation_4x4";
+          } else if (isSoldier) {
             mesh.castShadow = true;
-            mesh.receiveShadow = true;
-            // Prevent aggressive frustum culling on SkinnedMesh limbs
-            if ((mesh as THREE.SkinnedMesh).isSkinnedMesh) {
+            mesh.receiveShadow = false;
+          } else {
+            mesh.castShadow = true;
+            mesh.receiveShadow = key.includes("FloorSlab") || key.includes("Stairs");
+          }
+
+          if ((mesh as THREE.SkinnedMesh).isSkinnedMesh) {
+            if (isFpsArms) {
               mesh.frustumCulled = false;
+            } else {
+              // Generous local bounding sphere so off-screen AI soldiers are GPU frustum-culled!
+              mesh.geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0.95, 0), 2.2);
+              mesh.frustumCulled = true;
             }
           }
         });
+
         this.cache.set(key, gltf);
         done++;
         onProgress?.(done, total, key);
@@ -101,11 +190,22 @@ export class AssetLibrary {
   public cloneSkinned(key: string): { root: THREE.Object3D; animations: THREE.AnimationClip[] } {
     const gltf = this.getGLTF(key);
     const root = SkeletonUtils.clone(gltf.scene);
+    const isFpsArms = key === "CHR_FPS_Arms_Rig";
     root.traverse((o) => {
       if ((o as THREE.SkinnedMesh).isSkinnedMesh) {
-        o.frustumCulled = false;
-        o.castShadow = true;
-        o.receiveShadow = true;
+        const sm = o as THREE.SkinnedMesh;
+        if (isFpsArms) {
+          sm.frustumCulled = false;
+          sm.castShadow = false;
+          sm.receiveShadow = false;
+        } else {
+          if (!sm.geometry.boundingSphere) {
+            sm.geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0.95, 0), 2.2);
+          }
+          sm.frustumCulled = true;
+          sm.castShadow = true;
+          sm.receiveShadow = false;
+        }
       }
     });
     return { root, animations: gltf.animations };

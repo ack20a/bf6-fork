@@ -1,6 +1,7 @@
 /**
  * First-Person Tactical Infantry & Combined-Arms Player Controller.
- * Supports both Desktop Keyboard/Mouse (PointerLock) and Mobile Multi-Touch Twin-Stick Controls!
+ * Features True Muzzle-to-Crosshair Converged Ballistics, Crystal-Clear Holo/Reflex ADS Alignment,
+ * Desktop Keyboard/Mouse (PointerLock) and Mobile Multi-Touch Twin-Stick Controls!
  */
 
 import * as THREE from "three";
@@ -80,8 +81,8 @@ export class PlayerController implements DamageableActor {
   private joyTouchId: number | null = null;
   private joyOriginX = 0;
   private joyOriginY = 0;
-  private joyX = 0; // -1 (left) .. +1 (right)
-  private joyY = 0; // -1 (up/forward) .. +1 (down/back)
+  private joyX = 0;
+  private joyY = 0;
   private lookTouchId: number | null = null;
   private lookLastX = 0;
   private lookLastY = 0;
@@ -102,6 +103,20 @@ export class PlayerController implements DamageableActor {
   private armsActions = new Map<string, THREE.AnimationAction>();
   private muzzleFlashMesh: THREE.Mesh;
   private muzzleLight: THREE.PointLight;
+
+  // Reusable scratch math objects (zero per-frame GC!)
+  private readonly _fwdVec = new THREE.Vector3();
+  private readonly _rightVec = new THREE.Vector3();
+  private readonly _moveDir = new THREE.Vector3();
+  private readonly _vmPos = new THREE.Vector3();
+  private readonly _camPos = new THREE.Vector3();
+  private readonly _camQuat = new THREE.Quaternion();
+  private readonly _aimDir = new THREE.Vector3();
+  private readonly _aimTarget = new THREE.Vector3();
+  private readonly _muzzleWorld = new THREE.Vector3();
+  private readonly _muzzleLocal = new THREE.Vector3();
+  private readonly _shotDir = new THREE.Vector3();
+  private readonly _camUp = new THREE.Vector3();
 
   public onPlayerDeath?: () => void;
 
@@ -129,9 +144,22 @@ export class PlayerController implements DamageableActor {
     this.viewmodelRoot.add(this.armsRig);
     this.armsMixer = new THREE.AnimationMixer(this.armsRig);
     for (const clip of animations) {
-      this.armsActions.set(clip.name, this.armsMixer.clipAction(clip));
+      const act = this.armsMixer.clipAction(clip);
+      if (clip.name !== "FPS_Idle_Rifle") {
+        act.setLoop(THREE.LoopOnce, 1);
+        act.clampWhenFinished = false;
+      }
+      this.armsActions.set(clip.name, act);
     }
     this.armsActions.get("FPS_Idle_Rifle")?.play();
+
+    // Restore idle arms weight cleanly when reload or recoil clip completes
+    this.armsMixer.addEventListener("finished", () => {
+      const idle = this.armsActions.get("FPS_Idle_Rifle");
+      if (idle && !this.isReloading) {
+        idle.setEffectiveWeight(1.0);
+      }
+    });
 
     // 2. Build 4 Tactical Weapon Viewmodels
     this.slots = {
@@ -143,9 +171,9 @@ export class PlayerController implements DamageableActor {
         150,
         780,
         1.85,
-        new THREE.Vector3(0, -0.106, -0.22),
+        new THREE.Vector3(0, -0.1055, -0.16),
         new THREE.Vector3(0.145, -0.155, -0.27),
-        54,
+        52,
         assets
       ),
       2: this.buildSlot(
@@ -156,9 +184,9 @@ export class PlayerController implements DamageableActor {
         5,
         45,
         2.35,
-        new THREE.Vector3(-0.035, -0.075, -0.22),
+        new THREE.Vector3(0.042, -0.072, -0.18),
         new THREE.Vector3(0.16, -0.15, -0.24),
-        56,
+        55,
         assets
       ),
       3: this.buildSlot(
@@ -190,13 +218,18 @@ export class PlayerController implements DamageableActor {
     };
 
     // Muzzle flash star & point light attached to viewmodelRoot
-    const flashGeo = new THREE.SphereGeometry(0.048, 6, 6);
-    const flashMat = new THREE.MeshBasicMaterial({ color: 0xffcc55, transparent: true, opacity: 0.92 });
+    const flashGeo = new THREE.SphereGeometry(0.038, 6, 6);
+    const flashMat = new THREE.MeshBasicMaterial({
+      color: 0xffd266,
+      transparent: true,
+      opacity: 0.88,
+      depthWrite: false,
+    });
     this.muzzleFlashMesh = new THREE.Mesh(flashGeo, flashMat);
     this.muzzleFlashMesh.visible = false;
     this.viewmodelRoot.add(this.muzzleFlashMesh);
 
-    this.muzzleLight = new THREE.PointLight(0xffaa33, 0, 5.5);
+    this.muzzleLight = new THREE.PointLight(0xffaa33, 0, 5.0);
     this.viewmodelRoot.add(this.muzzleLight);
 
     this.equipSlot(1);
@@ -204,6 +237,11 @@ export class PlayerController implements DamageableActor {
     this.bindInputEvents();
     this.bindMobileTouchControls();
     this.physics.actors.push(this);
+  }
+
+  /** True when aiming down clear 3D holo/reflex sight on Slot 1 or Slot 2 (hides hipfire crosshair). */
+  public get isAdsOpticActive(): boolean {
+    return !this.activeVehicle && (this.activeSlot === 1 || this.activeSlot === 2) && this.adsBlend > 0.68;
   }
 
   private detectInitialTouchMode(): void {
@@ -245,6 +283,7 @@ export class PlayerController implements DamageableActor {
     root.traverse((o) => {
       if ((o as THREE.Mesh).isMesh) {
         o.castShadow = false;
+        o.receiveShadow = false;
         o.frustumCulled = false;
       }
       if (o.name.includes("Socket_Muzzle")) muzzleSocket = o;
@@ -255,7 +294,8 @@ export class PlayerController implements DamageableActor {
       if (o.name.includes("Clacker")) clackerMesh = o;
     });
 
-    if (adsSocket && slot === 1) {
+    // Align camera sight axis precisely through both M5A3 Holo Sight (Slot 1) and RPG-7V2 Side Optic (Slot 2)!
+    if (adsSocket && (slot === 1 || slot === 2)) {
       adsPos.x = -adsSocket.position.x;
       adsPos.y = -adsSocket.position.y;
     }
@@ -367,7 +407,6 @@ export class PlayerController implements DamageableActor {
   }
 
   private bindMobileTouchControls(): void {
-    // Auto-switch to Touch Mode on first touch anywhere
     window.addEventListener(
       "touchstart",
       () => {
@@ -377,7 +416,6 @@ export class PlayerController implements DamageableActor {
       { passive: true }
     );
 
-    // Clickable/Tappable Weapon Slots 1..4 & Interaction Prompt
     for (const s of [1, 2, 3, 4] as const) {
       const slotBtn = document.getElementById(`slot-${s}`);
       slotBtn?.addEventListener("click", (ev) => {
@@ -519,7 +557,7 @@ export class PlayerController implements DamageableActor {
     lookZone?.addEventListener("touchend", onLookEnd);
     lookZone?.addEventListener("touchcancel", onLookEnd);
 
-    // 3. Infantry Fire Button (Supports Hold + Drag-to-Aim simultaneously!)
+    // 3. Infantry Fire Button (Hold + Drag-to-Aim)
     const btnFire = document.getElementById("btn-touch-fire");
     btnFire?.addEventListener(
       "touchstart",
@@ -687,6 +725,10 @@ export class PlayerController implements DamageableActor {
     this.touchAdsToggled = false;
     this.isScoped8x = false;
 
+    this.armsActions.get("FPS_Reload_Tactical")?.stop();
+    this.armsActions.get("FPS_Fire_Recoil")?.stop();
+    this.armsActions.get("FPS_Idle_Rifle")?.setEffectiveWeight(1.0);
+
     const btnAds = document.getElementById("btn-touch-ads");
     const btnFire = document.getElementById("btn-touch-fire");
     if (btnAds) {
@@ -742,8 +784,8 @@ export class PlayerController implements DamageableActor {
     if (!this.activeVehicle) return;
     const v = this.activeVehicle;
     v.driverId = null;
-    const rightSide = new THREE.Vector3(Math.cos(v.yaw), 0, -Math.sin(v.yaw)).multiplyScalar(v.getHitRadius() + 1.1);
-    this.position.copy(v.getPosition()).add(rightSide);
+    this._rightVec.set(Math.cos(v.yaw), 0, -Math.sin(v.yaw)).multiplyScalar(v.getHitRadius() + 1.1);
+    this.position.copy(v.getPosition()).add(this._rightVec);
     this.position.y = Math.max(0.1, this.position.y);
     this.yaw = v.aimYaw;
     this.pitch = 0;
@@ -803,9 +845,17 @@ export class PlayerController implements DamageableActor {
     document.getElementById("btn-touch-ads")?.classList.remove("toggled");
     this.sfx.playReloadClick();
 
+    // Cleanly lower idle weight so reload clip plays at 100% authority without bone-weight averaging!
+    this.armsActions.get("FPS_Idle_Rifle")?.setEffectiveWeight(0.0);
+    this.armsActions.get("FPS_Fire_Recoil")?.stop();
     const relAct = this.armsActions.get("FPS_Reload_Tactical");
     if (relAct) {
-      relAct.reset().setLoop(THREE.LoopOnce, 1).play();
+      const clipDur = relAct.getClip().duration || 2.0;
+      relAct
+        .reset()
+        .setEffectiveTimeScale(clipDur / Math.max(0.5, w.reloadDuration))
+        .setEffectiveWeight(1.0)
+        .play();
     }
   }
 
@@ -818,6 +868,8 @@ export class PlayerController implements DamageableActor {
     this.isReloading = false;
     if (w.magMesh) w.magMesh.position.y = w.magRestY;
     if (w.warheadMesh && w.mag > 0) w.warheadMesh.visible = true;
+    this.armsActions.get("FPS_Reload_Tactical")?.stop();
+    this.armsActions.get("FPS_Idle_Rifle")?.setEffectiveWeight(1.0);
     this.sfx.playReloadClick();
   }
 
@@ -851,9 +903,9 @@ export class PlayerController implements DamageableActor {
     if (w.mag <= 0 || this.fireCooldown > 0) return;
     w.mag--;
     this.fireCooldown = 0.42;
-    const aimDir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion).normalize();
-    const origin = this.camera.position.clone().addScaledVector(aimDir, 0.35);
-    this.physics.throwStickyC4(origin, aimDir);
+    this._aimDir.set(0, 0, -1).applyQuaternion(this.camera.quaternion).normalize();
+    this._muzzleWorld.copy(this.camera.position).addScaledVector(this._aimDir, 0.35);
+    this.physics.throwStickyC4(this._muzzleWorld, this._aimDir);
     this.recoilKickPos = 0.04;
   }
 
@@ -866,6 +918,12 @@ export class PlayerController implements DamageableActor {
     }
   }
 
+  /**
+   * True Muzzle-Origin Converged Ballistics:
+   * 1. Raycasts along camera center-screen sightline to find exact target point `aimTarget`.
+   * 2. Reads live 3D world position of `w.muzzleSocket` on the viewmodel barrel.
+   * 3. Launches tracer/rocket FROM `muzzleWorld` angled directly onto `aimTarget`!
+   */
   private fireCurrentWeapon(): void {
     const w = this.getActiveWeapon();
     if (this.activeSlot === 4 || this.isReloading) return;
@@ -877,76 +935,110 @@ export class PlayerController implements DamageableActor {
     w.mag--;
     this.fireCooldown = 60.0 / w.rpm;
 
+    // Subtle controlled recoil in ADS so red-dot window stays crisp on target!
     const fireAct = this.armsActions.get("FPS_Fire_Recoil");
     if (fireAct) {
-      fireAct.reset().setLoop(THREE.LoopOnce, 1).play();
+      fireAct
+        .reset()
+        .setEffectiveWeight(this.adsBlend > 0.5 ? 0.22 : 0.85)
+        .play();
     }
     if (w.boltMesh) {
       w.boltMesh.position.z = w.boltRestZ + 0.055;
     }
 
-    this.muzzleFlashTimer = 0.042;
-    if (w.muzzleSocket) {
-      const mPos = new THREE.Vector3();
-      w.muzzleSocket.getWorldPosition(mPos);
-      this.viewmodelRoot.worldToLocal(mPos);
-      this.muzzleFlashMesh.position.copy(mPos);
-      this.muzzleLight.position.copy(mPos);
+    // Ensure camera & viewmodel world matrices reflect exact current frame pose!
+    this.camera.updateMatrixWorld(true);
+    this._aimDir.set(0, 0, -1).applyQuaternion(this.camera.quaternion).normalize();
+    this._rightVec.set(1, 0, 0).applyQuaternion(this.camera.quaternion);
+    this._camUp.set(0, 1, 0).applyQuaternion(this.camera.quaternion);
+
+    // 1. Exact world-space target point under crosshair / red-dot reticle
+    this.physics.raycastAimTarget(this.camera.position, this._aimDir, 230, "PLAYER", "NATO", this._aimTarget);
+
+    // 2. Exact 3D gun barrel muzzle world position
+    if (this.isScoped8x) {
+      // When 8x sniper overlay hides viewmodel, fire from realistic under-scope barrel bore (10cm below eye)
+      this._muzzleWorld
+        .copy(this.camera.position)
+        .addScaledVector(this._aimDir, 0.58)
+        .addScaledVector(this._camUp, -0.1);
+    } else if (w.muzzleSocket) {
+      w.muzzleSocket.getWorldPosition(this._muzzleWorld);
+      this._muzzleLocal.copy(this._muzzleWorld);
+      this.viewmodelRoot.worldToLocal(this._muzzleLocal);
+      this.muzzleFlashMesh.position.copy(this._muzzleLocal);
+      this.muzzleLight.position.copy(this._muzzleLocal);
     } else {
+      this._muzzleWorld
+        .copy(this.camera.position)
+        .addScaledVector(this._aimDir, 0.55)
+        .addScaledVector(this._rightVec, 0.12)
+        .addScaledVector(this._camUp, -0.1);
       this.muzzleFlashMesh.position.set(0.08, -0.08, -0.72);
     }
-    this.muzzleFlashMesh.visible = true;
-    this.muzzleFlashMesh.rotation.z = Math.random() * Math.PI;
-    this.muzzleLight.intensity = 3.2;
 
-    const aimDir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion).normalize();
-    const spreadAmt = this.adsBlend > 0.75 ? 0.0018 : 0.018;
-    const dir = aimDir
-      .clone()
-      .add(
-        new THREE.Vector3(
-          (Math.random() - 0.5) * spreadAmt,
-          (Math.random() - 0.5) * spreadAmt,
-          (Math.random() - 0.5) * spreadAmt
-        )
-      )
+    // Wall-hug safety: if barrel tip pokes into a wall right in front of player, pull back safely
+    if (this.physics.isSegmentBlocked(this.camera.position, this._muzzleWorld)) {
+      this._muzzleWorld
+        .copy(this.camera.position)
+        .addScaledVector(this._aimDir, 0.18)
+        .addScaledVector(this._rightVec, this.adsBlend > 0.5 ? 0 : 0.07)
+        .addScaledVector(this._camUp, -0.06);
+    }
+
+    if (!this.isScoped8x) {
+      this.muzzleFlashTimer = 0.036;
+      this.muzzleFlashMesh.visible = true;
+      this.muzzleFlashMesh.scale.setScalar(this.adsBlend > 0.6 ? 0.55 : 1.0);
+      this.muzzleFlashMesh.rotation.z = Math.random() * Math.PI;
+      this.muzzleLight.intensity = 2.8;
+    }
+
+    // 3. Converged trajectory from 3D Muzzle -> Crosshair Target + Tactical Dispersion
+    const spreadAmt = this.adsBlend > 0.75 ? 0.0015 : 0.016;
+    this._shotDir
+      .copy(this._aimTarget)
+      .sub(this._muzzleWorld)
       .normalize();
-
-    const origin = this.camera.position.clone().addScaledVector(aimDir, 0.35);
+    this._shotDir.x += (Math.random() - 0.5) * spreadAmt;
+    this._shotDir.y += (Math.random() - 0.5) * spreadAmt;
+    this._shotDir.z += (Math.random() - 0.5) * spreadAmt;
+    this._shotDir.normalize();
 
     if (this.activeSlot === 1) {
       this.sfx.playRifleShot(1.0, 0.28);
-      this.recoilKickPos = 0.022;
-      this.recoilKickPitch = 0.011;
-      this.pitch = Math.min(1.46, this.pitch + (0.005 + Math.random() * 0.004) * (this.adsBlend > 0.5 ? 0.65 : 1.0));
-      this.yaw += (Math.random() - 0.5) * 0.004;
+      this.recoilKickPos = this.adsBlend > 0.5 ? 0.012 : 0.022;
+      this.recoilKickPitch = this.adsBlend > 0.5 ? 0.005 : 0.011;
+      this.pitch = Math.min(1.46, this.pitch + (0.0045 + Math.random() * 0.0035) * (this.adsBlend > 0.5 ? 0.6 : 1.0));
+      this.yaw += (Math.random() - 0.5) * 0.0035;
       this.physics.spawnProjectile({
         kind: "bullet",
         team: "NATO",
         ownerId: "PLAYER",
         weaponName: "M5A3",
-        origin,
-        direction: dir,
-        speed: 175,
+        origin: this._muzzleWorld,
+        direction: this._shotDir,
+        speed: 185,
         damage: 34,
       });
     } else if (this.activeSlot === 2) {
       this.sfx.playRocketLaunch();
       if (w.warheadMesh) w.warheadMesh.visible = false;
-      this.recoilKickPos = 0.065;
-      this.recoilKickPitch = 0.045;
-      this.physics.addCameraShake(0.28);
+      this.recoilKickPos = 0.06;
+      this.recoilKickPitch = 0.04;
+      this.physics.addCameraShake(0.26);
       this.physics.spawnProjectile({
         kind: "rpg",
         team: "NATO",
         ownerId: "PLAYER",
         weaponName: "RPG-7V2",
-        origin: origin.addScaledVector(aimDir, 0.3),
-        direction: dir,
-        speed: 68,
+        origin: this._muzzleWorld,
+        direction: this._shotDir,
+        speed: 72,
         damage: 540,
         blastRadius: 5.5,
-        gravity: 3.5,
+        gravity: 3.4,
       });
       if (w.reserve > 0) {
         setTimeout(() => {
@@ -965,11 +1057,11 @@ export class PlayerController implements DamageableActor {
         team: "NATO",
         ownerId: "PLAYER",
         weaponName: "M2010 ESR",
-        origin,
-        direction: dir,
-        speed: 260,
+        origin: this._muzzleWorld,
+        direction: this._shotDir,
+        speed: 265,
         damage: 105,
-        gravity: 1.4,
+        gravity: 1.35,
       });
     }
 
@@ -1000,14 +1092,13 @@ export class PlayerController implements DamageableActor {
     this.resupplyCooldown = Math.max(0, this.resupplyCooldown - dt);
     if (!this.deployed) return;
 
-    // Out-of-combat Battlefield health regeneration
     if (this.regenDelay > 0) {
       this.regenDelay -= dt;
     } else if (this.hp < this.maxHp && this.hp > 0) {
       this.hp = Math.min(this.maxHp, this.hp + 14 * dt);
     }
 
-    // Handle active vehicle camera & destruction ejection
+    // Active vehicle camera & ejection
     if (this.activeVehicle) {
       if (!this.activeVehicle.isAlive()) {
         this.exitVehicle();
@@ -1015,24 +1106,20 @@ export class PlayerController implements DamageableActor {
         return;
       }
       this.nearbyVehicle = null;
-      const camPos = new THREE.Vector3();
-      const camQuat = new THREE.Quaternion();
-      this.activeVehicle.computeCameraPose(this.vehicleThirdPerson, camPos, camQuat);
+      this.activeVehicle.computeCameraPose(this.vehicleThirdPerson, this._camPos, this._camQuat);
 
       const shake = this.physics.consumeCameraShake(dt);
       if (shake > 0.001) {
-        camPos.add(
-          new THREE.Vector3((Math.random() - 0.5) * shake * 0.4, (Math.random() - 0.5) * shake * 0.4, 0)
-        );
+        this._camPos.x += (Math.random() - 0.5) * shake * 0.4;
+        this._camPos.y += (Math.random() - 0.5) * shake * 0.4;
       }
-      this.camera.position.copy(camPos);
-      this.camera.quaternion.copy(camQuat);
+      this.camera.position.copy(this._camPos);
+      this.camera.quaternion.copy(this._camQuat);
       this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, this.vehicleThirdPerson ? 76 : 62, dt * 10);
       this.camera.updateProjectionMatrix();
       return;
     }
 
-    // Infantry proximity checks (vehicles & auto-resupply crates)
     this.nearbyVehicle = this.vehicles.findEnterableVehicle(this.position, 5.2);
     document.getElementById("btn-touch-enter")?.classList.toggle("hidden", !this.nearbyVehicle);
     this.tryResupply(false);
@@ -1053,14 +1140,14 @@ export class PlayerController implements DamageableActor {
       document.getElementById("btn-touch-crouch")?.classList.remove("toggled");
     }
 
-    const fwdVec = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
-    const rightVec = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
-    const moveDir = new THREE.Vector3().addScaledVector(fwdVec, inFwd).addScaledVector(rightVec, inRight);
-    if (moveDir.lengthSq() > 1.0) moveDir.normalize();
+    this._fwdVec.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+    this._rightVec.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+    this._moveDir.set(0, 0, 0).addScaledVector(this._fwdVec, inFwd).addScaledVector(this._rightVec, inRight);
+    if (this._moveDir.lengthSq() > 1.0) this._moveDir.normalize();
 
     const baseSpeed = this.isSprinting ? 7.3 : this.isCrouching ? 3.1 : this.adsBlend > 0.5 ? 3.5 : 5.1;
-    this.velocity.x = moveDir.x * baseSpeed;
-    this.velocity.z = moveDir.z * baseSpeed;
+    this.velocity.x = this._moveDir.x * baseSpeed;
+    this.velocity.z = this._moveDir.z * baseSpeed;
 
     if ((this.keys.has("Space") || this.touchJumpQueued) && this.grounded) {
       this.velocity.y = 7.4;
@@ -1081,9 +1168,81 @@ export class PlayerController implements DamageableActor {
     );
     this.grounded = colRes.grounded;
 
-    // 2. Reload & Weapon Firing
-    this.fireCooldown = Math.max(0, this.fireCooldown - dt);
+    // 2. ADS Optic Interpolation & Camera Pose FIRST (so fireCurrentWeapon reads exact current-frame muzzle!)
     const w = this.getActiveWeapon();
+    const targetAds = wantsAds ? 1.0 : 0.0;
+    this.adsBlend = THREE.MathUtils.lerp(this.adsBlend, targetAds, Math.min(1, dt * 14));
+    this.isScoped8x = this.activeSlot === 3 && this.adsBlend > 0.82;
+    this.viewmodelRoot.visible = !this.isScoped8x;
+
+    const portraitBonus = this.camera.aspect < 0.85 ? 8 : 0;
+    const baseFov = (this.isSprinting ? 80 : 74) + portraitBonus;
+    const targetFov = THREE.MathUtils.lerp(baseFov, w.adsFov, this.adsBlend);
+    if (Math.abs(this.camera.fov - targetFov) > 0.05) {
+      this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, Math.min(1, dt * 14));
+      this.camera.updateProjectionMatrix();
+    }
+
+    const targetEyeH = this.isCrouching ? 1.12 : 1.62;
+    const curEyeH = THREE.MathUtils.lerp(this.camera.position.y - this.position.y, targetEyeH, Math.min(1, dt * 12));
+    const horizSpd = Math.hypot(this.velocity.x, this.velocity.z);
+    if (this.grounded && horizSpd > 0.4) {
+      this.walkBobTime += dt * (this.isSprinting ? 13.5 : 9.2);
+    } else {
+      this.walkBobTime += dt * 1.6;
+    }
+
+    const shake = this.physics.consumeCameraShake(dt);
+    this.camera.position.set(
+      this.position.x + (Math.random() - 0.5) * shake * 0.28,
+      this.position.y +
+        curEyeH +
+        Math.sin(this.walkBobTime) * (horizSpd > 0.5 ? 0.022 : 0.003) * (1 - this.adsBlend * 0.88),
+      this.position.z + (Math.random() - 0.5) * shake * 0.28
+    );
+    this.camera.rotation.set(this.pitch, this.yaw, 0);
+
+    // 3. Viewmodel Sway, Sprint Tilt, Recoil Recovery & Bolt Return
+    this.recoilKickPos = THREE.MathUtils.lerp(this.recoilKickPos, 0, Math.min(1, dt * 18));
+    this.recoilKickPitch = THREE.MathUtils.lerp(this.recoilKickPitch, 0, Math.min(1, dt * 18));
+    if (w.boltMesh) {
+      w.boltMesh.position.z = THREE.MathUtils.lerp(w.boltMesh.position.z, w.boltRestZ, Math.min(1, dt * 22));
+    }
+    if (this.clackerAnimTimer > 0) {
+      this.clackerAnimTimer -= dt;
+      if (w.clackerMesh) w.clackerMesh.rotation.x = this.clackerAnimTimer > 0 ? -0.32 : 0;
+    }
+
+    if (this.muzzleFlashTimer > 0) {
+      this.muzzleFlashTimer -= dt;
+      if (this.muzzleFlashTimer <= 0) {
+        this.muzzleFlashMesh.visible = false;
+        this.muzzleLight.intensity = 0;
+      }
+    }
+
+    this._vmPos.lerpVectors(w.hipPos, w.adsPos, this.adsBlend);
+    if (this.camera.aspect < 0.85 && this.adsBlend < 0.5) {
+      this._vmPos.x *= 0.62;
+    }
+    const bobAmp = horizSpd > 0.5 ? (1 - this.adsBlend * 0.92) * 0.011 : 0.0015;
+    this._vmPos.x += Math.cos(this.walkBobTime * 0.5) * bobAmp;
+    this._vmPos.y += Math.abs(Math.sin(this.walkBobTime * 0.5)) * bobAmp - (this.isSprinting ? 0.035 : 0);
+    this._vmPos.z += this.recoilKickPos;
+
+    this.viewmodelRoot.position.copy(this._vmPos);
+    const sprintPitch = this.isSprinting ? -0.22 : 0;
+    const sprintYaw = this.isSprinting ? 0.34 : 0;
+    this.viewmodelRoot.rotation.set(
+      this.recoilKickPitch + sprintPitch,
+      sprintYaw,
+      this.isSprinting ? -0.14 : 0
+    );
+
+    this.armsMixer.update(dt);
+
+    // 4. Reload & Weapon Firing (executed AFTER camera & viewmodel update so muzzle world-pos is 0-lag accurate!)
+    this.fireCooldown = Math.max(0, this.fireCooldown - dt);
     const wantsFire = this.mouseLeft || this.touchFirePrimary;
 
     if (this.isReloading) {
@@ -1103,78 +1262,5 @@ export class PlayerController implements DamageableActor {
         this.touchFirePrimary = false;
       }
     }
-
-    // 3. ADS Optic Interpolation & 8x Sniper Scope Toggle
-    const targetAds = wantsAds ? 1.0 : 0.0;
-    this.adsBlend = THREE.MathUtils.lerp(this.adsBlend, targetAds, Math.min(1, dt * 13));
-    this.isScoped8x = this.activeSlot === 3 && this.adsBlend > 0.82;
-    this.viewmodelRoot.visible = !this.isScoped8x;
-
-    // Slightly wider base FOV in narrow portrait mobile screens so battlefield visibility stays generous
-    const portraitBonus = this.camera.aspect < 0.85 ? 8 : 0;
-    const baseFov = (this.isSprinting ? 80 : 74) + portraitBonus;
-    const targetFov = THREE.MathUtils.lerp(baseFov, w.adsFov, this.adsBlend);
-    if (Math.abs(this.camera.fov - targetFov) > 0.05) {
-      this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, Math.min(1, dt * 14));
-      this.camera.updateProjectionMatrix();
-    }
-
-    // 4. Camera Eye Height, Headbob & Blast Shake
-    const targetEyeH = this.isCrouching ? 1.12 : 1.62;
-    const curEyeH = THREE.MathUtils.lerp(this.camera.position.y - this.position.y, targetEyeH, Math.min(1, dt * 12));
-    const horizSpd = Math.hypot(this.velocity.x, this.velocity.z);
-    if (this.grounded && horizSpd > 0.4) {
-      this.walkBobTime += dt * (this.isSprinting ? 13.5 : 9.2);
-    } else {
-      this.walkBobTime += dt * 1.6;
-    }
-
-    const shake = this.physics.consumeCameraShake(dt);
-    this.camera.position.set(
-      this.position.x + (Math.random() - 0.5) * shake * 0.28,
-      this.position.y + curEyeH + Math.sin(this.walkBobTime) * (horizSpd > 0.5 ? 0.024 : 0.004) * (1 - this.adsBlend * 0.8),
-      this.position.z + (Math.random() - 0.5) * shake * 0.28
-    );
-    this.camera.rotation.set(this.pitch, this.yaw, 0);
-
-    // 5. Viewmodel Sway, Sprint Tilt, Recoil Recovery & Bolt Return
-    this.recoilKickPos = THREE.MathUtils.lerp(this.recoilKickPos, 0, Math.min(1, dt * 16));
-    this.recoilKickPitch = THREE.MathUtils.lerp(this.recoilKickPitch, 0, Math.min(1, dt * 16));
-    if (w.boltMesh) {
-      w.boltMesh.position.z = THREE.MathUtils.lerp(w.boltMesh.position.z, w.boltRestZ, Math.min(1, dt * 22));
-    }
-    if (this.clackerAnimTimer > 0) {
-      this.clackerAnimTimer -= dt;
-      if (w.clackerMesh) w.clackerMesh.rotation.x = this.clackerAnimTimer > 0 ? -0.32 : 0;
-    }
-
-    if (this.muzzleFlashTimer > 0) {
-      this.muzzleFlashTimer -= dt;
-      if (this.muzzleFlashTimer <= 0) {
-        this.muzzleFlashMesh.visible = false;
-        this.muzzleLight.intensity = 0;
-      }
-    }
-
-    const vmPos = new THREE.Vector3().lerpVectors(w.hipPos, w.adsPos, this.adsBlend);
-    // Slightly pull viewmodel inward on narrow portrait phones so rifle sight isn't clipped on the right edge
-    if (this.camera.aspect < 0.85 && this.adsBlend < 0.5) {
-      vmPos.x *= 0.62;
-    }
-    const bobAmp = horizSpd > 0.5 ? (1 - this.adsBlend * 0.88) * 0.012 : 0.002;
-    vmPos.x += Math.cos(this.walkBobTime * 0.5) * bobAmp;
-    vmPos.y += Math.abs(Math.sin(this.walkBobTime * 0.5)) * bobAmp - (this.isSprinting ? 0.035 : 0);
-    vmPos.z += this.recoilKickPos;
-
-    this.viewmodelRoot.position.copy(vmPos);
-    const sprintPitch = this.isSprinting ? -0.22 : 0;
-    const sprintYaw = this.isSprinting ? 0.34 : 0;
-    this.viewmodelRoot.rotation.set(
-      this.recoilKickPitch + sprintPitch,
-      sprintYaw,
-      this.isSprinting ? -0.14 : 0
-    );
-
-    this.armsMixer.update(dt);
   }
 }

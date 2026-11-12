@@ -58,6 +58,7 @@ export class BattlefieldHUD {
   private hitmarkerTimer = 0;
   private fpsFrames = 0;
   private fpsAccum = 0;
+  private minimapTimer = 0;
 
   public setVisible(visible: boolean): void {
     this.hudEl.classList.toggle("hidden", !visible);
@@ -119,12 +120,12 @@ export class BattlefieldHUD {
       }
     }
 
-    // Damage vignette & 8x Sniper Scope
+    // Damage vignette, 8x Sniper Scope & ADS Holo Sight Crosshair Auto-Hide
     this.dmgVignette.style.opacity = String(
       Math.max(player.damageFlash, player.hp < 35 ? (35 - player.hp) / 55 : 0).toFixed(2)
     );
     this.scopeEl.classList.toggle("hidden", !player.isScoped8x);
-    this.crosshairEl.style.opacity = player.isScoped8x ? "0" : "1";
+    this.crosshairEl.style.opacity = player.isScoped8x || player.isAdsOpticActive ? "0" : "1";
 
     // Conquest Tickets & Flags
     this.ticketsNatoEl.textContent = String(map.ticketsNATO);
@@ -173,7 +174,7 @@ export class BattlefieldHUD {
 
     const w = player.getActiveWeapon();
     this.ammoMagEl.textContent = player.isReloading ? "RLD" : String(w.mag);
-    this.ammoResEl.textContent = player.activeSlot === 4 ? `${map["physics"]?.plantedC4s?.length ?? 0} 已部署` : String(w.reserve);
+    this.ammoResEl.textContent = player.activeSlot === 4 ? `${map.physics.plantedC4s.length} 已部署` : String(w.reserve);
     this.weaponNameEl.textContent = w.displayName;
 
     const hpInt = Math.ceil(player.hp);
@@ -199,7 +200,11 @@ export class BattlefieldHUD {
     else if (pPos.x < -60) this.sectorEl.textContent = "SECTOR CHARLIE";
     else this.sectorEl.textContent = "SECTOR ALPHA";
 
-    this.drawMinimap(pPos.x, pPos.z, lookYaw, map, ai, vehicles);
+    this.minimapTimer -= dt;
+    if (this.minimapTimer <= 0) {
+      this.minimapTimer = 0.05;
+      this.drawMinimap(pPos.x, pPos.z, lookYaw, map, ai, vehicles);
+    }
   }
 
   private drawMinimap(
